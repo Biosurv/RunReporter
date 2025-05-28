@@ -212,7 +212,7 @@ class App(QMainWindow):
         self.destination_entry.setGeometry(int(screen_width * 0.13), int(screen_height * 0.32),
                                            int(screen_width * 0.8), int(screen_height * 0.06))
         self.destination_entry.setFont(QFont('Arial', 11))
-        self.destination_entry.setText('C:/Users/SheanMobed/OneDrive - Biosurv International/Desktop')
+        #self.destination_entry.setText('C:/Users/SheanMobed/OneDrive - Biosurv International/Desktop')
 
         self.destination_label = QLabel('Destination:', self)
         self.destination_label.setStyleSheet("background-color:transparent")
