@@ -30,10 +30,9 @@ The detailed run reports should be completed by the technical team lead before t
 - ToReport
 - AnalysisPipelineVersion
 - MinKNOWSoftwareVersion
-- EmergenceGroupVDPV[1|2|3]
 - Piranha columns
 
-The user can supply as many reports as they want to the app. The app will check for empty information such as EpidNumber and warn the user. The two software version will be filled in as missing in the output if missing and the EmergenceGroup of a VDPV will be filled in as LINEAGE_HERE if missing as well. Please return to those reports and will the information and run the app again.
+The user can supply as many reports as they want to the app. The app will check for empty information such as EpidNumber and warn the user. The two software version will be filled in as missing in the output if missing. The EmergenceGroup of a VDPV will be set to UNKNOWN. Please return to those reports and will the information and run the app again.
 
 The filenames for the reports are expected to be in the format YYYYMMDD_RUNNUMBER_detailed_run_report.csv, e.g. 20250528_001_detailed_run_report.csv. This won't prevent the app from working but will mess up the output filename.
 
@@ -43,3 +42,21 @@ The main output of app is the HTML report described above. Below is an example:
 
 
 The app also has a small text window that will show a simplified version of the report, useful if want to check the output at a glance or copy it using the copy button. The text can be put into an email for example.
+
+## Compiling the app
+
+If you want to compile the app yourself, perhaps for a OS that isn't currently supported. This app was compiled using Nuitka and in the misc folder, there is the conda environment YAML that was used to build the app. You can clone this repository if you want to compile the app:
+
+1. Create the Conda/Mamba environment using:
+```
+[conda|mamba] env create -f extras/nuitka.yml
+```
+2. Activate the environment:
+```
+[conda|mamba] activate nuitka
+```
+4. Use the compilation command:
+```
+nuitka --onefile --enable-plugins=pyqt5 --include-data-files=Logo.png=./Logo.png --include-data-files=Icon.ico=./Icon.ico --disable-console --windows-icon-from-ico=Icon.ico --company-name="Biosurv International" --product-name="CSV Merger Application" --file-version=2.1.0 --file-description=="This App merges LabID and EpiID files to a standard output"  Merger_before_piranha.py
+```
+Make sure that you are the Python Version folder.

@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QListWidget, QLineEdit, Q
 # AUTHOR - Shean Mobed
 # ORG - Biosurv International
 
+
 # DESCRIPTION
 """
 This App takes the final detailed run reports made by the Piranha pipeline, https://github.com/polio-nanopore/piranha, a makes a simple HTML report of all the results. 
@@ -23,9 +24,7 @@ Information presented per run:
 # Compile Command - in commandprompt
 """
 WINDOWS
-nuitka --onefile --enable-plugins=pyqt5 --include-data-files=Logo.png=./Logo.png --include-data-files=Icon.ico=./Icon.ico --disable-console 
---windows-icon-from-ico=Icon.ico --company-name="Biosurv International" --product-name="Run Reporter" --file-version=1.5.3
---file-description=="This App generates the contents of the email and a HTML report for DDNS/Isolate testing runs"  run_reporter.py
+nuitka --onefile --enable-plugins=pyqt5 --include-data-dir=assets=./assets --disable-console --windows-icon-from-ico=assets/Icon.ico --company-name="Biosurv International" --product-name="Run Reporter" --file-version=1.5.4 --file-description=="This App generates the contents of the email and a HTML report for DDNS/Isolate testing runs"  run_reporter.py
 """
 
 # CHANGELOG 
@@ -182,7 +181,7 @@ class App(QMainWindow):
         self.mode_label = QLabel('Mode:', self)
         self.mode_label.setStyleSheet("background-color:transparent")
         self.mode_label.setGeometry(int(screen_width * 0.05), int(screen_height * 0.16),
-                                    int(screen_width * 0.2), int(screen_height * 0.02))
+                                    int(screen_width * 0.1), int(screen_height * 0.02))
         self.mode_label.setFont(QFont('Arial', 9))
 
         # ---- DROPBOX ----
@@ -304,30 +303,33 @@ class App(QMainWindow):
         html = "<!DOCTYPE html><html><head>"  
          
         report_name_list = []
-        ddns_total_pass = pd.DataFrame(columns=['DDNSclassification'])
-        ddns_total_sample_fail = pd.DataFrame(columns=['DDNSclassification'])
-        ddns_total_run_fail = pd.DataFrame(columns=['DDNSclassification'])
+        ddns_total_pass = pd.DataFrame(columns=['classification'])
+        ddns_total_sample_fail = pd.DataFrame(columns=['classification'])
+        ddns_total_run_fail = pd.DataFrame(columns=['classification'])
 
         minknow_ver = 'missing'
         piranha_ver = 'missing'
         
-        essential_cols = ['sample','DDNSclassification','EpidNumber','RunQC','SampleQC','ToReport',
-                          'AnalysisPipelineVersion','MinKNOWSoftwareVersion',
-                          'EmergenceGroupVDPV1','EmergenceGroupVDPV2','EmergenceGroupVDPV3',
-                          'Sabin1-related|classification','Sabin1-related|nt_diff_from_reference',
-                          'Sabin2-related|classification','Sabin2-related|nt_diff_from_reference',
-                          'Sabin3-related|classification','Sabin3-related|nt_diff_from_reference']
+        report_mode = self.mode.currentText()
+        if report_mode == 'DDNS':
+            essential_cols = ['sample','DDNSclassification','EpidNumber','RunQC','SampleQC','ToReport',
+                            'AnalysisPipelineVersion','MinKNOWSoftwareVersion',
+                            'Sabin1-related|classification','Sabin1-related|nt_diff_from_reference',
+                            'Sabin2-related|classification','Sabin2-related|nt_diff_from_reference',
+                            'Sabin3-related|classification','Sabin3-related|nt_diff_from_reference']
+        else:
+            essential_cols = ['sample','IsolateClassification','EpidNumber','RunQC','SampleQC','ToReport',
+                'AnalysisPipelineVersion','MinKNOWSoftwareVersion',
+                'Sabin1-related|classification','Sabin1-related|nt_diff_from_reference',
+                'Sabin2-related|classification','Sabin2-related|nt_diff_from_reference',
+                'Sabin3-related|classification','Sabin3-related|nt_diff_from_reference']
+        
+        # Removed because of new samples csv format, will leave here in case
+        # 'EmergenceGroupVDPV1','EmergenceGroupVDPV2','EmergenceGroupVDPV3',
 
         col_rename_dict = {
-        'DDNS classification':'DDNSclassification',
-        'DDNSClassification':'DDNSclassification',
-        'DDNSClassifications':'DDNSclassification',
-        'EPIDNumber':'EpidNumber',
-        'EpiNumber':'EpidNumber',
-        'epidNumber':'EpidNumber',
-        'RunQC.1':'RunQC',
-        'RunQC1':'RunQC',
-        'Run_QC':'RunQC'}
+        'DDNSclassification':'classification',
+        'IsolateClassification':'classification'}
 
         for path in paths:
             report_name = path.rsplit('/')[-1].rsplit('_',3)[0]
@@ -357,14 +359,14 @@ class App(QMainWindow):
             vdpv_found = False
             sabin_found = False
 
-            # Rename columns
-            report.rename(columns=col_rename_dict, inplace=True)
-
             # Column presence check
             missing_cols = []
             for _ in essential_cols:
                 if not _ in report.columns:
                     missing_cols.append(_)
+                    
+            # Rename classification columns
+            report.rename(columns=col_rename_dict, inplace=True)
             
             if len(missing_cols) == 1:         
                 QMessageBox.warning(self, 'Warning', f'Column: {missing_cols[0]} missing from report, please use correct report format')
@@ -435,7 +437,7 @@ class App(QMainWindow):
             report['SampleQC'] = report['SampleQC'].fillna('').str.strip().str.title()
             
             # Set to upper to find typos
-            report['DDNSclassification'] = report['DDNSclassification'].str.upper().str.strip()
+            report['classification'] = report['classification'].str.upper().str.strip()
             
             if report.empty:
                 text += f'Completely negative.\n'
@@ -464,10 +466,10 @@ class App(QMainWindow):
                 return '+'.join(classifications) if classifications else 'Negative'
 
             # Apply the classify function to each row
-            report['DDNSclassification'] = report.apply(classify, axis=1)
+            report['classification'] = report.apply(classify, axis=1)
             
             # Counts number of EPIDs that are negative
-            neg_epid_count = report.loc[(report['DDNSclassification'] == 'Negative')].drop_duplicates(subset='EpidNumber',keep='first').DDNSclassification.value_counts()            
+            neg_epid_count = report.loc[(report['classification'] == 'Negative')].drop_duplicates(subset='EpidNumber',keep='first').classification.value_counts()            
             
             # if all samples have a class then neg is 0
             if neg_epid_count.empty:
@@ -492,23 +494,23 @@ class App(QMainWindow):
             html += f'\n<h4>Summary count for run {report_name}</h4>'
             
             # Creating counts table
-            table = pd.concat([ddns_pass.DDNSclassification.value_counts(), ddns_sample_fail.DDNSclassification.value_counts(), ddns_run_fail.DDNSclassification.value_counts()], axis=1, ignore_index=False, keys=['Pass','Sample Fail','Run Fail']).fillna(0).astype(int).sort_index().reset_index(names='DDNS Classification')
+            table = pd.concat([ddns_pass.classification.value_counts(), ddns_sample_fail.classification.value_counts(), ddns_run_fail.classification.value_counts()], axis=1, ignore_index=False, keys=['Pass','Sample Fail','Run Fail']).fillna(0).astype(int).sort_index().reset_index(names=f'{report_mode} Classification')
             table.loc[len(table.index)] = ['Total', table['Pass'].sum(), table['Sample Fail'].sum(), table['Run Fail'].sum()] # Add total row
 
             text += (table.to_string(index=False, justify='left') + '\n\n')
             html += (table.to_html(index=False) + '\n')
             
             # Splitting on the + and create duplicate row below with explode
-            if not report[report['DDNSclassification'].str.contains('\\+', na=False)].empty:
-                combos = report[report['DDNSclassification'].str.contains('\\+', na=False)]
-                combos.loc[:,'DDNSclassification'] = combos['DDNSclassification'].str.split("\\+")
-                combos = combos.explode('DDNSclassification')
+            if not report[report['classification'].str.contains('\\+', na=False)].empty:
+                combos = report[report['classification'].str.contains('\\+', na=False)]
+                combos.loc[:,'classification'] = combos['classification'].str.split("\\+")
+                combos = combos.explode('classification')
                 report = pd.concat([report,combos])
 
             # DDNS sample summariser
             for ddns_type in ['VDPV1', 'VDPV2', 'VDPV3']:
                 # Selecting VDPV    
-                ddns_report = report.loc[(report['DDNSclassification'] == ddns_type)& (report['SampleQC'] == 'Pass')]         
+                ddns_report = report.loc[(report['classification'] == ddns_type)& (report['SampleQC'] == 'Pass')]         
                 if not ddns_report.empty:
                     vdpv_found = True
                     #print('Found VDPV')
@@ -521,14 +523,17 @@ class App(QMainWindow):
                         nt_diff = int(epid_row[f'Sabin{ddns_type[-1]}-related|nt_diff_from_reference'].dropna().values[0])
                         
                         # Lineage extraction
-                        epid_row['lineage'] = epid_row['EmergenceGroupVDPV1'].combine_first(epid_row['EmergenceGroupVDPV2']).combine_first(epid_row['EmergenceGroupVDPV3'])
-                        epid_row['lineage'] = epid_row['lineage'].fillna('').astype('str').str.strip()
+                        # epid_row['lineage'] = epid_row['EmergenceGroupVDPV1'].combine_first(epid_row['EmergenceGroupVDPV2']).combine_first(epid_row['EmergenceGroupVDPV3'])
+                        # epid_row['lineage'] = epid_row['lineage'].fillna('').astype('str').str.strip()
                         
                         # Grab emergence group info
-                        if epid_row['lineage'].ne('').all():
-                            lineage = epid_row['lineage'].unique()[0].upper()
-                        else:
-                            lineage = 'LINEAGE_HERE' # Placeholder if empty
+                        # if epid_row['lineage'].ne('').all():
+                        #     lineage = epid_row['lineage'].unique()[0].upper()
+                        # else:
+                            # lineage = 'LINEAGE_HERE' # Placeholder if empty
+
+                        # since the latest DDNS headers have removed the emergence group columns, lineage will be set to UNKNOWN
+                        lineage = 'UNKNOWN'
                         
                         # Handles pairs
                         if len(epid_row[ddns_report.columns[0]].values) == 2:
@@ -560,10 +565,10 @@ class App(QMainWindow):
                 html += f"<p>No VDPVs to report were found</p>\n"    
             
             # Displaying Sabin positive values
-            if self.mode.currentText() == 'DDNS':
+            if  report_mode == 'DDNS':
                 for ddns_type in ['SABIN1', 'SABIN2', 'SABIN3']:
                     # Selecting Sabin
-                    ddns_report = report.loc[(report['DDNSclassification'] == ddns_type) & (report['SampleQC'] == 'Pass')]
+                    ddns_report = report.loc[(report['classification'] == ddns_type) & (report['SampleQC'] == 'Pass')]
                     if not ddns_report.empty:
                         sabin_found = True
                         text += f'\nSamples with less than {10 if ddns_type == "SABIN1" or ddns_type == "SABIN3" else 6} VP1 nt differences compared to Sabin{ddns_type[-1]} that can be reported:\n'
@@ -599,12 +604,12 @@ class App(QMainWindow):
                     text += f"No Sabins to report were found\n" 
                     html += f"<p>No Sabins to report were found</p>\n"
             
-            print(envs[['sample','DDNSclassification','SampleQC']])
+            print(envs[['sample','classification','SampleQC']])
             
             # ENV sample summariser
             for ddns_type in ['VDPV1', 'VDPV2', 'VDPV3']:
                 # Selecting VDPV    
-                env_report = envs.loc[(envs['DDNSclassification'] == ddns_type) & (envs['SampleQC'] == 'Pass')]       
+                env_report = envs.loc[(envs['classification'] == ddns_type) & (envs['SampleQC'] == 'Pass')]       
                 if not env_report.empty:
                     vdpv_found = True
                     #print('Found VDPV')
@@ -618,14 +623,15 @@ class App(QMainWindow):
                         nt_diff = int(s_row[f'Sabin{ddns_type[-1]}-related|nt_diff_from_reference'].dropna().values[0])
                         
                         # Lineage extraction
-                        s_row['lineage'] = s_row['EmergenceGroupVDPV1'].combine_first(s_row['EmergenceGroupVDPV2']).combine_first(s_row['EmergenceGroupVDPV3'])
-                        s_row['lineage'] = s_row['lineage'].fillna('').astype('str').str.strip()
+                        # s_row['lineage'] = s_row['EmergenceGroupVDPV1'].combine_first(s_row['EmergenceGroupVDPV2']).combine_first(s_row['EmergenceGroupVDPV3'])
+                        # s_row['lineage'] = s_row['lineage'].fillna('').astype('str').str.strip()
                         
-                        # Grab emergence group info
-                        if s_row['lineage'].ne('').all():
-                            lineage = s_row['lineage'].unique()[0].upper()
-                        else:
-                            lineage = 'LINEAGE_HERE' # Placeholder if empty
+                        # # Grab emergence group info
+                        # if s_row['lineage'].ne('').all():
+                        #     lineage = s_row['lineage'].unique()[0].upper()
+                        # else:
+                        #     lineage = 'LINEAGE_HERE' # Placeholder if empty
+                        lineage = 'UNKNOWN'
                         
                         text += f'•\t{s_row[env_report.columns[0]].values[0]}: {nt_diff} nucleotide differences.\n'
                         html += f'<li>\t{s_row[env_report.columns[0]].values[0]}: {nt_diff} nucleotide differences.\n'
@@ -668,10 +674,10 @@ class App(QMainWindow):
             html += f'\n<p>Number of Negative EPIDs: {neg_epid_count.values[0]}</p>' 
 
         # Totals, applied in reverse order since adding to the top of text
-        total_table = pd.concat([ddns_total_pass.DDNSclassification.value_counts(), ddns_total_sample_fail.DDNSclassification.value_counts(), ddns_total_run_fail.DDNSclassification.value_counts()], axis=1, ignore_index=False, keys=['Pass','Sample Fail','Run Fail']).fillna(0).astype(int).sort_index().reset_index(names='DDNS Classification')
+        total_table = pd.concat([ddns_total_pass.classification.value_counts(), ddns_total_sample_fail.classification.value_counts(), ddns_total_run_fail.classification.value_counts()], axis=1, ignore_index=False, keys=['Pass','Sample Fail','Run Fail']).fillna(0).astype(int).sort_index().reset_index(names=f'{report_mode} Classification')
         print(total_table)
         # table with negs
-        total_table_no_neg = total_table[total_table['DDNS Classification'] != 'Negative']
+        total_table_no_neg = total_table[total_table[f'{report_mode} Classification'] != 'Negative']
         
         # total row appended
         total_table.loc[len(total_table.index)] = ['Total', total_table['Pass'].sum(), total_table['Sample Fail'].sum(), total_table['Run Fail'].sum()] # Add total row
@@ -702,11 +708,11 @@ class App(QMainWindow):
         if len(report_name_list) > 1:
             text = f"DDNS Report for Runs {report_name_list[0]} to {report_name_list[-1]}\n\n" + text
             html = f"<h1>DDNS REPORT FOR RUNS {report_name_list[0]} TO {report_name_list[-1]}</h1>" + html
-            html_file_output = f"{destination_path}/DDNS_report_{report_name_list[0]}_to_{report_name_list[-1]}.html"
+            html_file_output = f"{destination_path}/{report_mode}_report_{report_name_list[0]}_to_{report_name_list[-1]}.html"
         else:
             text = f"DDNS Report For Run {report_name_list[0]}\n\n" + text
             html = f"<h1>DDNS REPORT FOR RUN {report_name_list[0]}</h1>" + html
-            html_file_output = f"{destination_path}/DDNS_report_{report_name_list[0]}.html"
+            html_file_output = f"{destination_path}/{report_mode}_report_{report_name_list[0]}.html"
         
         # Acknowledgments
         html += "<p>These data were produced using polio sequencing <a href='https://www.protocols.io/workspaces/poliovirus-sequencing-consortium/about'>Protocols</a> and analysis <a href='https://github.com/polio-nanopore/piranha'>software</a> developed by the <a href='https://polionanopore.org/about.html'>Polio Sequencing Consortium</a></p>"        
