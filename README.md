@@ -57,6 +57,6 @@ If you want to compile the app yourself, perhaps for a OS that isn't currently s
 ```
 4. Use the compilation command:
 ```
-nuitka --onefile --enable-plugins=pyqt5 --include-data-files=Logo.png=./Logo.png --include-data-files=Icon.ico=./Icon.ico --disable-console --windows-icon-from-ico=Icon.ico --company-name="Biosurv International" --product-name="CSV Merger Application" --file-version=2.1.0 --file-description=="This App merges LabID and EpiID files to a standard output"  Merger_before_piranha.py
+nuitka --onefile --enable-plugins=pyqt5 --include-data-dir=assets=./assets --disable-console --windows-icon-from-ico=assets/Icon.ico --company-name="Biosurv International" --product-name="Run Reporter" --file-version=1.5.4 --file-description=="This App generates the contents of the email and a HTML report for DDNS/Isolate testing runs"  run_reporter.py
 ```
 Make sure that you are the Python Version folder.
