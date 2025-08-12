@@ -29,11 +29,10 @@ nuitka --onefile --enable-plugins=pyqt5 --include-data-dir=assets=./assets --dis
 
 # CHANGELOG 
 """
- V1.5.3 --> V1.5.4
-- Adding a feature to report Isolate and DDNS runs differently, Isolate mode does not report SABINS
-- updated regex can now handle sample name structures like ABC/25/00001 as well as ABC-25-00001 l. 335 - 338
+ V1.5.4 --> V1.5.5
+- Added support for XLSX files, now can read both XLSX and CSV files
 """
-version = '1.5.4'
+version = '1.5.5'
 
 def setup_logging(log_path=None):
     """Set up logging with a rotating file handler."""
@@ -110,9 +109,10 @@ class ListBoxWidget(QListWidget):
 
     def dragEnterEvent(self, event):
         bg_label.hide()
+        allowed_extensions = ('.csv', '.xlsx')
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            if all(url.toString().endswith('.csv') for url in urls):
+            if all(url.toLocalFile().lower().endswith(allowed_extensions) for url in urls):
                 event.accept()
             else:
                 event.ignore()
@@ -128,8 +128,9 @@ class ListBoxWidget(QListWidget):
 
     def dropEvent(self, event):
         #self.clear()
+        allowed_extensions = ('.csv', '.xlsx')
         urls = event.mimeData().urls()
-        file_paths = [url.toLocalFile() for url in urls if url.toString().endswith('.csv')]
+        file_paths = [url.toLocalFile() for url in urls if url.toLocalFile().lower().endswith(allowed_extensions)]
         self.addItems(file_paths)
 
         bg_label.setText('')
@@ -199,7 +200,7 @@ class App(QMainWindow):
         self.listbox_label.setFont(QFont('Arial', 9))
 
         global bg_label # set to global scope so it can be changed in various other app functions
-        bg_label = QLabel('Drop CSVs here', self)
+        bg_label = QLabel('Drop CSV or XLSX files here', self)
         bg_label.setStyleSheet("background-color:#FAF9F6")
         bg_label.setGeometry(int(screen_width * 0.5), int(screen_height * 0.23),
                              int(screen_width * 0.2), int(screen_height * 0.05))
@@ -337,12 +338,18 @@ class App(QMainWindow):
             print(report_name)
             
             try:
-                report = pd.read_csv(path, sep=None, engine='python')
+                if path.endswith('.csv'):
+                    report = pd.read_csv(path, sep=None, engine='python')
+                else:
+                    report = pd.read_excel(path)
                 
             except pd.errors.ParserError as e:
                 print(e)
                 line_error = str(e).split('.')[0]
-                QMessageBox.warning(self, 'Warning', f'Error reading {report_name} CSV file, {line_error}')
+                if path.endswith('.csv'):
+                    QMessageBox.warning(self, 'Warning', f'Error reading {report_name} CSV file, {line_error}')
+                else:
+                    QMessageBox.warning(self, 'Warning', f'Error reading {report_name} XLSX file, {line_error}')
                 continue
             
             print('REPORT HEAD')
@@ -735,7 +742,7 @@ class App(QMainWindow):
         self.listbox_view.clear()
         self.textbox.clear()
         #self.destination_entry.clear()
-        bg_label.setText('Drop CSVs here')
+        bg_label.setText('Drop CSV or XLSX files here')
         bg_label.show()
 
 
