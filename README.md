@@ -59,7 +59,7 @@ If you want to compile the app yourself, perhaps for a OS that isn't currently s
 ```
 nuitka --onefile --enable-plugins=pyqt5 --include-data-dir=assets=./assets --disable-console --windows-icon-from-ico=assets/Icon.ico --company-name="Biosurv International" --product-name="Run Reporter" --file-version=1.5.4 --file-description=="This App generates the contents of the email and a HTML report for DDNS/Isolate testing runs"  run_reporter.py
 ```
-If v1.5.5+ use pyinstaller for compilation as follows:
+If v1.5.5+, ensure PyQt5, pandas and openpyxl are installed in your environment and use pyinstaller for compilation as follows:
 ```
 pyinstaller --onefile --windowed --icon=assets/Icon.ico --name="Run Reporter" --add-data "assets;assets" run_reporter.py
 ```
