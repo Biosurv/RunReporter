@@ -6,7 +6,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap, QFont, QIcon, QClipboard
 from PyQt5.QtWidgets import QApplication, QMainWindow, QListWidget, QLineEdit, QPushButton, QMessageBox, QLabel, QFileDialog, QPlainTextEdit, QComboBox
 
-# AUTHOR - Shean Mobed
+# AUTHORS - Shean Mobed, Matthew Anderson
 # ORG - Biosurv International
 
 
@@ -55,7 +55,6 @@ def setup_logging(log_path=None):
 
 # Initial logging setup
 current_log_path = setup_logging()
-logging.error(f"Starting Run Reporter version {version}")
 
 class ErrorHandler:
     """Redirect stderr to log errors."""
@@ -313,13 +312,13 @@ class App(QMainWindow):
         
         report_mode = self.mode.currentText()
         if report_mode == 'DDNS':
-            essential_cols = ['sample','DDNSclassification','EpidNumber','RunQC','SampleQC','ToReport',
+            essential_cols = ['sample','DDNSclassification','EPID','RunQC','SampleQC',
                             'AnalysisPipelineVersion','MinKNOWSoftwareVersion',
                             'Sabin1-related|classification','Sabin1-related|nt_diff_from_reference',
                             'Sabin2-related|classification','Sabin2-related|nt_diff_from_reference',
                             'Sabin3-related|classification','Sabin3-related|nt_diff_from_reference']
         else:
-            essential_cols = ['sample','IsolateClassification','EpidNumber','RunQC','SampleQC','ToReport',
+            essential_cols = ['sample','IsolateClassification','EPID','RunQC','SampleQC',
                 'AnalysisPipelineVersion','MinKNOWSoftwareVersion',
                 'Sabin1-related|classification','Sabin1-related|nt_diff_from_reference',
                 'Sabin2-related|classification','Sabin2-related|nt_diff_from_reference',
