@@ -31,8 +31,14 @@ nuitka --onefile --enable-plugins=pyqt5 --include-data-dir=assets=./assets --dis
 """
  V1.5.4 --> V1.5.5
 - Added support for XLSX files, now can read both XLSX and CSV files
+
+ V1.5.5 --> V1.5.6
+- Removed requirement of 'toReport' column
+- Changed column name of 'EpidNumber' to 'EPID'
+- Removed log file generation on start up
+
 """
-version = '1.5.5'
+version = '1.5.6'
 
 def setup_logging(log_path=None):
     """Set up logging with a rotating file handler."""
