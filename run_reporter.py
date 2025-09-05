@@ -4,9 +4,13 @@ from logging.handlers import RotatingFileHandler
 import pandas as pd
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap, QFont, QIcon, QClipboard
-from PyQt5.QtWidgets import QApplication, QMainWindow, QListWidget, QLineEdit, QPushButton, QMessageBox, QLabel, QFileDialog, QPlainTextEdit, QComboBox
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QListWidget, QLineEdit, QPushButton, QMessageBox, QLabel,
+    QFileDialog, QPlainTextEdit, QComboBox, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSizePolicy,
+    QStackedLayout
+)
 
-# AUTHORS - Shean Mobed, Matthew Anderson
+# AUTHOR - Shean Mobed, Matthew Anderson
 # ORG - Biosurv International
 
 
@@ -122,10 +126,12 @@ class ListBoxWidget(QListWidget):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.resize(500, 500)
-
+        self.bg_label = None  # will be set by App
 
     def dragEnterEvent(self, event):
-        bg_label.hide()
+        # Hide bg_label on drag enter
+        if hasattr(self, 'bg_label'):
+            self.bg_label.hide()
         allowed_extensions = ('.csv', '.xlsx')
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
@@ -144,143 +150,151 @@ class ListBoxWidget(QListWidget):
             event.ignore()
 
     def dropEvent(self, event):
-        #self.clear()
         allowed_extensions = ('.csv', '.xlsx')
         urls = event.mimeData().urls()
         file_paths = [url.toLocalFile() for url in urls if url.toLocalFile().lower().endswith(allowed_extensions)]
         self.addItems(file_paths)
+        # Hide bg_label when files are dropped
+        if hasattr(self, 'bg_label'):
+            self.bg_label.hide()
 
-        bg_label.setText('')
+    def resizeEvent(self, event):
+        # Ensure bg_label always fills the widget
+        if self.bg_label is not None:
+            self.bg_label.resize(self.size())
+        super().resizeEvent(event)
 
 
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        screen_size = self.screen().size()
-        screen_width = int(screen_size.width() * 0.5)
-        screen_height = int(screen_size.height() * 0.8)
-        self.resize(screen_width, screen_height)  # 1200,1000 original
+        self.setWindowTitle("Run Reporter")
+        self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "assets/Icon.ico")))
 
-        self.setStyleSheet("background-color: white; color: black;")  # Set window color to white
+        # Central widget and main layout
+        central_widget = QWidget(self)
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(10)
 
-        self.setWindowIcon(
-            QIcon(os.path.join(os.path.dirname(__file__), "assets/Icon.ico")))  # Sets top left icon to custom icon
-        self.setWindowTitle("Run Reporter")  # App Title
-
-        # ---- LOGO ----
-        self.logo_label = QLabel(self)
-        self.logo_label.setGeometry(int(screen_width * 0.03), int(screen_height * 0.03),
-                                    int(screen_width * 0.1), int(screen_height * 0.1))  # Logo position x/y and dimension x/y
-        pixmap = QPixmap(os.path.join(os.path.dirname(__file__), 'assets/Logo.png'))
-        self.logo_label.setPixmap(pixmap)
+        # Top: Logo, Title, Version
+        top_layout = QHBoxLayout()
+        self.logo_label = QLabel()
+        self.logo_label.setPixmap(QPixmap(os.path.join(os.path.dirname(__file__), 'assets/Logo.png')))
         self.logo_label.setScaledContents(True)
-        
-        # ---- TITLE ----
-        self.title = QLabel('Run Reporter', self)
-        self.title.setStyleSheet("background-color:transparent")
-        self.title.setGeometry(int(screen_width * 0.4), int(screen_height * 0.08),
-                                    int(screen_width * 0.25), int(screen_height * 0.05))
+        self.logo_label.setFixedSize(80, 80)
+        top_layout.addWidget(self.logo_label, 0, Qt.AlignLeft)
+
+        title_layout = QVBoxLayout()
+        self.title = QLabel('Run Reporter')
         self.title.setFont(QFont('Arial', 18))
-        
-        # ---- VERSION ----
-        self.version_label = QLabel(f'Version: {version}', self)
-        self.version_label.setStyleSheet("background-color:transparent")
-        self.version_label.setGeometry(int(screen_width * 0.8), int(screen_height * 0.16),
-                                    int(screen_width * 0.2), int(screen_height * 0.02))
+        self.title.setStyleSheet("background-color:transparent")
+        title_layout.addWidget(self.title, 0, Qt.AlignCenter)
+
+        self.version_label = QLabel(f'Version: {version}')
         self.version_label.setFont(QFont('Arial', 9))
-        
-        # ---- MODE ----
-        self.mode = QComboBox(self)
-        self.mode.addItems(["DDNS","Isolate"])
-        self.mode.setGeometry(int(screen_width * 0.13), int(screen_height * 0.15),
-                              int(screen_width * 0.1), int(screen_height * 0.04))
-        
-        self.mode_label = QLabel('Mode:', self)
-        self.mode_label.setStyleSheet("background-color:transparent")
-        self.mode_label.setGeometry(int(screen_width * 0.05), int(screen_height * 0.16),
-                                    int(screen_width * 0.1), int(screen_height * 0.02))
+        self.version_label.setStyleSheet("background-color:transparent")
+        title_layout.addWidget(self.version_label, 0, Qt.AlignCenter)
+        top_layout.addLayout(title_layout, 1)
+
+        main_layout.addLayout(top_layout)
+
+        # Mode selection
+        mode_layout = QHBoxLayout()
+        self.mode_label = QLabel('Mode:')
         self.mode_label.setFont(QFont('Arial', 9))
+        self.mode_label.setStyleSheet("background-color:transparent")
+        mode_layout.addWidget(self.mode_label)
+        self.mode = QComboBox()
+        self.mode.addItems(["DDNS", "Isolate"])
+        self.mode.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        mode_layout.addWidget(self.mode)
+        main_layout.addLayout(mode_layout)
 
-        # ---- DROPBOX ----
-        self.listbox_view = ListBoxWidget(self)
-        self.listbox_view.setStyleSheet("background-color:#FAF9F6;border-color:lightgrey;border-style: "
-                                        "dashed;border-width: 2px;border-radius: 10px;")
-
-        self.listbox_view.setGeometry(int(screen_width * 0.13), int(screen_height * 0.2),
-                                      int(screen_width * 0.8), int(screen_height * 0.1))
-
-        self.listbox_label = QLabel('Dropbox:', self)
-        self.listbox_label.setStyleSheet("background-color:transparent")
-        self.listbox_label.setGeometry(int(screen_width * 0.05), int(screen_height * 0.24),
-                                       int(screen_width * 0.2), int(screen_height * 0.02))
+        # Dropbox with overlay label
+        dropbox_layout = QVBoxLayout()
+        self.listbox_label = QLabel('Dropbox:')
         self.listbox_label.setFont(QFont('Arial', 9))
+        self.listbox_label.setStyleSheet("background-color:transparent")
+        dropbox_layout.addWidget(self.listbox_label)
 
-        global bg_label # set to global scope so it can be changed in various other app functions
-        bg_label = QLabel('Drop CSV or XLSX files here', self)
-        bg_label.setStyleSheet("background-color:#FAF9F6")
-        bg_label.setGeometry(int(screen_width * 0.5), int(screen_height * 0.23),
-                             int(screen_width * 0.2), int(screen_height * 0.05))
-        
-        # ---- DESTINATION BOX ----
-        self.destination_entry = QLineEdit(self)
-        self.destination_entry.setStyleSheet("background-color:#FAF9F6;border-color:lightgrey;border-style: "
-                                             "dashed;border-width: 2px;border-radius: 10px;")
-        self.destination_entry.setGeometry(int(screen_width * 0.13), int(screen_height * 0.32),
-                                           int(screen_width * 0.8), int(screen_height * 0.06))
-        self.destination_entry.setFont(QFont('Arial', 11))
-        #self.destination_entry.setText('C:/Users/SheanMobed/OneDrive - Biosurv International/Desktop')
+        # Stacked layout for dropbox and overlay label
+        dropbox_stack = QStackedLayout()
+        self.listbox_view = ListBoxWidget(self)
+        self.listbox_view.setStyleSheet("background-color:#FAF9F6;border-color:lightgrey;border-style:dashed;border-width:2px;border-radius:10px;")
+        self.listbox_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self.destination_label = QLabel('Destination:', self)
-        self.destination_label.setStyleSheet("background-color:transparent")
-        self.destination_label.setGeometry(int(screen_width * 0.03), int(screen_height * 0.325),
-                                           int(screen_width * 0.2), int(screen_height * 0.05))
+        # Overlay label
+        self.bg_label = QLabel('Drop CSV or XLSX files here', self.listbox_view)
+        self.bg_label.setAlignment(Qt.AlignCenter)
+        self.bg_label.setStyleSheet("background:transparent; color: #888; font-size: 18px;")
+        self.bg_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.bg_label.setGeometry(0, 0, 1, 1)
+        self.listbox_view.bg_label = self.bg_label  # set for ListBoxWidget
+
+        dropbox_stack.addWidget(self.listbox_view)
+        dropbox_stack.setStackingMode(QStackedLayout.StackAll)
+        dropbox_layout.addLayout(dropbox_stack)
+        dropbox_layout.setStretch(1, 1)
+        main_layout.addLayout(dropbox_layout)
+
+        # Destination
+        dest_layout = QHBoxLayout()
+        self.destination_label = QLabel('Destination:')
         self.destination_label.setFont(QFont('Arial', 9))
-        
-        # ---- TEXTBOX ----
-        self.textbox = QPlainTextEdit(self)
-        self.textbox.setGeometry(int(screen_width * 0.13), int(screen_height * 0.4),
-                                 int(screen_width * 0.8), int(screen_height * 0.47))
-
-        self.textbox_label = QLabel('Report:', self)
-        self.textbox_label.setStyleSheet("background-color:transparent")
-        self.textbox_label.setGeometry(int(screen_width * 0.05), int(screen_height * 0.58),
-                                       int(screen_width * 0.2), int(screen_height * 0.05))
-        self.textbox_label.setFont(QFont('Arial', 9))
-
-        # ---- BUTTONS ----        
-        self.btn_save = QPushButton('Generate Report', self)
-        self.btn_save.setGeometry(int(screen_width * 0.15), int(screen_height * 0.9),
-                                  int(screen_width * 0.15), int(screen_height * 0.07))  
-        self.btn_save.setFont(QFont('Arial', 9))
-        self.btn_save.setStyleSheet("QPushButton{color: black; border-radius: 15px;background-color:#f7ae6c;border-color:black;border-style: solid;border-width: 1px;}"
-                                    "QPushButton::pressed{background-color : #fce0b0;}")
-        self.btn_save.clicked.connect(self.parse_csv)
-        
-        # User defined file destination
-        self.destination_btn = QPushButton('Destination', self)
-        self.destination_btn.setGeometry(int(screen_width * 0.35), int(screen_height * 0.9), int(screen_width * 0.15), int(screen_height * 0.07))  # 750, 770, 300, 100
+        self.destination_label.setStyleSheet("background-color:transparent")
+        dest_layout.addWidget(self.destination_label)
+        self.destination_entry = QLineEdit()
+        self.destination_entry.setFont(QFont('Arial', 11))
+        self.destination_entry.setStyleSheet("background-color:#FAF9F6;border-color:lightgrey;border-style:dashed;border-width:2px;border-radius:10px;")
+        dest_layout.addWidget(self.destination_entry, 1)
+        self.destination_btn = QPushButton('Destination')
         self.destination_btn.setFont(QFont('Arial', 9))
-        self.destination_btn.setStyleSheet("QPushButton{color: black; border-radius: 15px;background-color:#f7ae6c;border-color:black;border-style: solid;border-width: 1px;}"
-                                    "QPushButton::pressed{background-color : #fce0b0;}")
+        self.destination_btn.setStyleSheet("QPushButton{color: black; border-radius: 15px;background-color:#f7ae6c;border-color:black;border-style: solid;border-width: 1px;}QPushButton::pressed{background-color : #fce0b0;}")
         self.destination_btn.clicked.connect(lambda: self.select_destination(3))
-        
-        self.btn_clear = QPushButton('Clear', self)
-        self.btn_clear.setGeometry(int(screen_width * 0.55), int(screen_height * 0.9), int(screen_width * 0.15),
-                                   int(screen_height * 0.07))  
-        self.btn_clear.setFont(QFont('Arial', 9))
-        self.btn_clear.setStyleSheet("QPushButton{color: black; border-radius: 15px;background-color:#f7ae6c;border-color:black;border-style: solid;border-width: 1px;}"
-                                    "QPushButton::pressed{background-color : #fce0b0;}")
-        self.btn_clear.clicked.connect(self.clear_list)
+        dest_layout.addWidget(self.destination_btn)
+        main_layout.addLayout(dest_layout)
 
-        self.btn_copy = QPushButton('Copy', self)
-        self.btn_copy.setGeometry(int(screen_width * 0.75), int(screen_height * 0.9), int(screen_width * 0.15),
-                                   int(screen_height * 0.07))  
+        # Report textbox
+        self.textbox_label = QLabel('Report:')
+        self.textbox_label.setFont(QFont('Arial', 9))
+        self.textbox_label.setStyleSheet("background-color:transparent")
+        main_layout.addWidget(self.textbox_label)
+        self.textbox = QPlainTextEdit()
+        self.textbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        main_layout.addWidget(self.textbox, 2)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.btn_save = QPushButton('Generate Report')
+        self.btn_save.setFont(QFont('Arial', 9))
+        self.btn_save.setStyleSheet("QPushButton{color: black; border-radius: 15px;background-color:#f7ae6c;border-color:black;border-style: solid;border-width: 1px;}QPushButton::pressed{background-color : #fce0b0;}")
+        self.btn_save.clicked.connect(self.parse_csv)
+        btn_layout.addWidget(self.btn_save)
+
+        self.btn_clear = QPushButton('Clear')
+        self.btn_clear.setFont(QFont('Arial', 9))
+        self.btn_clear.setStyleSheet("QPushButton{color: black; border-radius: 15px;background-color:#f7ae6c;border-color:black;border-style: solid;border-width: 1px;}QPushButton::pressed{background-color : #fce0b0;}")
+        self.btn_clear.clicked.connect(self.clear_list)
+        btn_layout.addWidget(self.btn_clear)
+
+        self.btn_copy = QPushButton('Copy')
         self.btn_copy.setFont(QFont('Arial', 9))
-        self.btn_copy.setStyleSheet("QPushButton{color: black; border-radius: 15px;background-color:#f7ae6c;border-color:black;border-style: solid;border-width: 1px;}"
-                                    "QPushButton::pressed{background-color : #fce0b0;}")
+        self.btn_copy.setStyleSheet("QPushButton{color: black; border-radius: 15px;background-color:#f7ae6c;border-color:black;border-style: solid;border-width: 1px;}QPushButton::pressed{background-color : #fce0b0;}")
         self.btn_copy.clicked.connect(self.copy_text_to_clipboard)
-        
+        btn_layout.addWidget(self.btn_copy)
+
+        main_layout.addLayout(btn_layout)
+
+        # Make widgets expand with window
+        for widget in [self.textbox, self.listbox_view]:
+            widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # Optionally: set minimum size for usability
+        self.setMinimumSize(800, 600)
+
     def select_destination(self, type):
         file_dialog = QFileDialog()
         file_dialog.setFileMode(QFileDialog.AnyFile if type in (1, 2) else QFileDialog.Directory)
@@ -352,7 +366,7 @@ class App(QMainWindow):
         invalid_samples = []
         num_reports = len(paths)
         counter = 0
-     
+
         for path in paths:
             counter += 1
             report_name = path.rsplit('/')[-1].rsplit('_',3)[0]
@@ -452,9 +466,6 @@ class App(QMainWindow):
                 msg_text += "\n".join(list(set(invalid_samples)))
                 msg = CustomMessageBox("info", msg_text)
                 msg.exec_()
-            
-            # print('ENV Report after sample name filter')
-            # print(envs.head())
                         
             # Minknow and Piranha version check
             if report['MinKNOWSoftwareVersion'].isnull().any():
@@ -465,7 +476,7 @@ class App(QMainWindow):
                 return
             
             # Verifies all EPIDs are present
-            if report.EpidNumber.isnull().any():
+            if report.EPID.isnull().any():
                 QMessageBox.warning(self, 'Warning', f'Missing EPIDs in {report_name}')
                 text += 'This run has missing EPIDs, please complete report!\n'
                 html += '<p><b><mark>This run has missing EPIDs, please complete report!</mark></b></p>\n'
@@ -508,7 +519,7 @@ class App(QMainWindow):
             report['classification'] = report.apply(classify, axis=1)
             
             # Counts number of EPIDs that are negative
-            neg_epid_count = report.loc[(report['classification'] == 'Negative')].drop_duplicates(subset='EpidNumber',keep='first').classification.value_counts()            
+            neg_epid_count = report.loc[(report['classification'] == 'Negative')].drop_duplicates(subset='EPID',keep='first').classification.value_counts()            
             
             # if all samples have a class then neg is 0
             if neg_epid_count.empty:
@@ -556,9 +567,9 @@ class App(QMainWindow):
                     text += f'Samples with at least {10 if ddns_type == "VDPV1" or ddns_type == "VDPV3" else 6} VP1 nt differences compared to Sabin {ddns_type[-1]} that can be reported.\n'
                     html += f'<p>Samples with at least {10 if ddns_type == "VDPV1" or ddns_type == "VDPV3" else 6} VP1 nt differences compared to Sabin {ddns_type[-1]} that can be reported.</p>\n<ul>'
                     
-                    for EPID in set(ddns_report['EpidNumber'].dropna().values):
+                    for EPID in set(ddns_report['EPID'].dropna().values):
                         # Grab EPID row and nt diff info
-                        epid_row = ddns_report[ddns_report['EpidNumber'] == EPID]                        
+                        epid_row = ddns_report[ddns_report['EPID'] == EPID]                        
                         nt_diff = int(epid_row[f'Sabin{ddns_type[-1]}-related|nt_diff_from_reference'].dropna().values[0])
                         
                         # Lineage extraction
@@ -576,12 +587,12 @@ class App(QMainWindow):
                         
                         # Handles pairs
                         if len(epid_row[ddns_report.columns[0]].values) == 2:
-                            text += f'•\t{epid_row["EpidNumber"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
-                            html += f'<li>{epid_row["EpidNumber"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
+                            text += f'•\t{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
+                            html += f'<li>{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
                         # Handles loner sample
                         else:
-                            text += f'•\t{epid_row["EpidNumber"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
-                            html += f'<li>\t{epid_row["EpidNumber"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
+                            text += f'•\t{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
+                            html += f'<li>\t{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
 
                         # GPEI statement
                         text += f'Genetically related to {lineage}. This sample is immediately classified as {ddns_type} as described in GPEI Guidelines for reporting and Classification of Vaccine-derived Polioviruses.\n\n'
@@ -613,20 +624,20 @@ class App(QMainWindow):
                         text += f'\nSamples with less than {10 if ddns_type == "SABIN1" or ddns_type == "SABIN3" else 6} VP1 nt differences compared to Sabin{ddns_type[-1]} that can be reported:\n'
                         html += f'<p>Samples with less than {10 if ddns_type == "SABIN1" or ddns_type == "SABIN3" else 6} VP1 nt differences compared to Sabin{ddns_type[-1]} that can be reported:<p/>\n<ul>'
 
-                        for EPID in set(ddns_report['EpidNumber'].dropna().values):
+                        for EPID in set(ddns_report['EPID'].dropna().values):
                             # Grab EPID row and nt diff info
-                            epid_row = ddns_report[ddns_report['EpidNumber'] == EPID]
+                            epid_row = ddns_report[ddns_report['EPID'] == EPID]
                             nt_diff = int(epid_row[f'Sabin{ddns_type[-1]}-related|nt_diff_from_reference'].dropna().values[0])
                             
                             # Handles pairs
                             if len(epid_row[ddns_report.columns[0]].values) == 2:
-                                text += f'•\t{epid_row["EpidNumber"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
-                                html += f'<li>{epid_row["EpidNumber"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
+                                text += f'•\t{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
+                                html += f'<li>{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
                             
                             # Handles loner sample
                             else:
-                                text += f'•\t{epid_row["EpidNumber"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
-                                html += f'<li>{epid_row["EpidNumber"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
+                                text += f'•\t{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
+                                html += f'<li>{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
                     # Stops trailing end list characters from loops, for nicer looking html
                     if html[-5:] == "</ul>":
                         html += ''
@@ -773,10 +784,9 @@ class App(QMainWindow):
     def clear_list(self):
         self.listbox_view.clear()
         self.textbox.clear()
-        #self.destination_entry.clear()
-        bg_label.setText('Drop CSV or XLSX files here')
-        bg_label.show()
-
+        # Show bg_label again when cleared
+        if hasattr(self.listbox_view, 'bg_label'):
+            self.listbox_view.bg_label.show()
 
 if __name__ == '__main__':
     try:
@@ -787,3 +797,10 @@ if __name__ == '__main__':
     except Exception as e:
         logging.error("Application initialization failed", exc_info=True)
         print(f"Application failed to start: {str(e)}")
+        prog = App()
+        prog.show()
+        sys.exit(app.exec_())
+    except Exception as e:
+        logging.error("Application initialization failed", exc_info=True)
+        print(f"Application failed to start: {str(e)}")
+
