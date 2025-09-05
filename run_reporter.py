@@ -29,16 +29,18 @@ nuitka --onefile --enable-plugins=pyqt5 --include-data-dir=assets=./assets --dis
 
 # CHANGELOG 
 """
- V1.5.4 --> V1.5.5
-- Added support for XLSX files, now can read both XLSX and CSV files
 
  V1.5.5 --> V1.5.6
 - Removed requirement of 'toReport' column
 - Changed column name of 'EpidNumber' to 'EPID'
 - Removed log file generation on start up
 
+V1.5.6 --> V1.5.7 
+- Improved sample regex
+- Added pop-up to ensure the user knows what has been labelled as control
+
 """
-version = '1.5.6'
+version = '1.5.7'
 
 def setup_logging(log_path=None):
     """Set up logging with a rotating file handler."""
@@ -90,17 +92,27 @@ class CustomMessageBox(QMessageBox):
         self.setWindowTitle(type.capitalize())
         self.setText(message)
         self.setStandardButtons(QMessageBox.Ok)
+
+        if type.lower() == "warning":
+            self.setIcon(QMessageBox.Warning)
+        elif type.lower() in ("info", "information"):
+            self.setIcon(QMessageBox.Information)
+        elif type.lower() == "error":
+            self.setIcon(QMessageBox.Critical)
+        else:
+            self.setIcon(QMessageBox.NoIcon)
+
         warning_style = """
             QMessageBox {background-color: white;color: black;}
             QMessageBox QLabel {color: black;}
-            QMessageBox QPushButton {background-color: #ff9800; color: white;padding: 5px;border-radius: 3px; min-width: 80px; margin-left: auto; margin-right: auto;}
+            QMessageBox QPushButton {background-color: #ff9800; color: black;padding: 5px;border-radius: 3px; min-width: 80px; margin-left: auto; margin-right: auto;}
             QMessageBox QPushButton:hover {background-color: #e68900;}
         """
         information_style = """
             QMessageBox {background-color: white; color: black;}
             QMessageBox QLabel {color: black;}
-            QMessageBox QPushButton {background-color: #2196F3; color: white;padding: 5px;border-radius: 3px; min-width: 80px; margin-left: auto; margin-right: auto;}
-            QMessageBox QPushButton:hover {background-color: #1e87d9;}
+            QMessageBox QPushButton {background-color: #ff9800; color: black;padding: 5px;border-radius: 3px; min-width: 80px; margin-left: auto; margin-right: auto;}
+            QMessageBox QPushButton:hover {background-color: #e68900;}
         """
         self.setStyleSheet(warning_style if type.lower() == "warning" else information_style)
 
@@ -337,7 +349,12 @@ class App(QMainWindow):
         'DDNSclassification':'classification',
         'IsolateClassification':'classification'}
 
+        invalid_samples = []
+        num_reports = len(paths)
+        counter = 0
+     
         for path in paths:
+            counter += 1
             report_name = path.rsplit('/')[-1].rsplit('_',3)[0]
             report_name_list.append(report_name)
             print(report_name)
@@ -422,9 +439,19 @@ class App(QMainWindow):
                 report['SampleQC'] = 'Fail'
             
             # filter off envs for different processing
-            envs = report.loc[report['sample'].str.match(r'^ENV-[A-Z]{3}[/-]\d{2}[/-]\d{3,5}$')]
+            envs = report.loc[report['sample'].str.match(r'^ENV-[A-Z]{3}[/-]\d{2}[/-]\d{3,5}')]
+
             # Remove controls from df using regex
-            report = report.loc[report['sample'].str.match(r'^[A-Z]{3}[/-]\d{2}[/-]\d{3,5}$')]
+            mask = report['sample'].str.match(r'^[A-Z]{3}[/-]\d{2}[/-]\d{3,5}')
+            invalid_samples.extend(report.loc[~mask, 'sample'].tolist())  # extend list
+            report = report.loc[mask]
+            # print('ENV Report after sample name filter')
+            # print(envs.head())
+            if counter == num_reports:
+                msg_text = "The following sample IDs have been indentified as controls and will be removed:\n\n"
+                msg_text += "\n".join(list(set(invalid_samples)))
+                msg = CustomMessageBox("info", msg_text)
+                msg.exec_()
             
             # print('ENV Report after sample name filter')
             # print(envs.head())
