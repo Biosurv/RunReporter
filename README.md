@@ -25,9 +25,8 @@ The detailed run reports should be completed by the technical team lead before t
 
 - sample
 - [DDNS|Isolate]classification
-- EpidNumber
+- EPID
 - [Run|Sample]QC
-- ToReport
 - AnalysisPipelineVersion
 - MinKNOWSoftwareVersion
 - Piranha columns
