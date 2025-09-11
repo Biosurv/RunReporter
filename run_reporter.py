@@ -2,7 +2,10 @@
 import sys, os, logging
 from logging.handlers import RotatingFileHandler
 import pandas as pd
+from collections import defaultdict
+from updater import UpdateChecker
 from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QSettings
 from PyQt5.QtGui import QPixmap, QFont, QIcon, QClipboard
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QListWidget, QLineEdit, QPushButton, QMessageBox, QLabel,
@@ -10,7 +13,7 @@ from PyQt5.QtWidgets import (
     QStackedLayout
 )
 
-# AUTHOR - Shean Mobed, Matthew Anderson
+# AUTHORS - Shean Mobed, Matthew Anderson
 # ORG - Biosurv International
 
 
@@ -34,17 +37,16 @@ nuitka --onefile --enable-plugins=pyqt5 --include-data-dir=assets=./assets --dis
 # CHANGELOG 
 """
 
- V1.5.5 --> V1.5.6
-- Removed requirement of 'toReport' column
-- Changed column name of 'EpidNumber' to 'EPID'
-- Removed log file generation on start up
-
 V1.5.6 --> V1.5.7 
 - Improved sample regex
 - Added pop-up to ensure the user knows what has been labelled as control
 
+V1.5.7 --> V1.5.8
+- Added run number info to control pop-up and ability to cancel report generation if controls are invalid
+- Added version checking against latest release on GitHub
+
 """
-version = '1.5.7'
+version = '1.5.8'
 
 def setup_logging(log_path=None):
     """Set up logging with a rotating file handler."""
@@ -101,6 +103,7 @@ class CustomMessageBox(QMessageBox):
             self.setIcon(QMessageBox.Warning)
         elif type.lower() in ("info", "information"):
             self.setIcon(QMessageBox.Information)
+            self.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
         elif type.lower() == "error":
             self.setIcon(QMessageBox.Critical)
         else:
@@ -119,6 +122,10 @@ class CustomMessageBox(QMessageBox):
             QMessageBox QPushButton:hover {background-color: #e68900;}
         """
         self.setStyleSheet(warning_style if type.lower() == "warning" else information_style)
+
+    def ask_confirmation(self):
+        result = self.exec_()
+        return result != QMessageBox.Cancel
 
 # APP
 class ListBoxWidget(QListWidget):
@@ -171,6 +178,21 @@ class App(QMainWindow):
 
         self.setWindowTitle("Run Reporter")
         self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "assets/Icon.ico")))
+        QSettings("Biosurv International", "RunReporter").clear()
+
+        self.updater = UpdateChecker(
+            owner="Biosurv",
+            repo="RunReporter",
+            current_version=version,
+            check_prereleases=False,
+            min_interval_minutes=0,
+            github_token=None,
+            settings_org="Biosurv International",
+            settings_app="RunReporter",
+        )
+
+        # Kick it off (non-blocking). It will show a popup itself if needed.
+        self.updater.check_on_startup(parent=self, force=True)
 
         # Central widget and main layout
         central_widget = QWidget(self)
@@ -364,6 +386,7 @@ class App(QMainWindow):
         'IsolateClassification':'classification'}
 
         invalid_samples = []
+        invalid_map = defaultdict(set)
         num_reports = len(paths)
         counter = 0
 
@@ -457,15 +480,39 @@ class App(QMainWindow):
 
             # Remove controls from df using regex
             mask = report['sample'].str.match(r'^[A-Z]{3}[/-]\d{2}[/-]\d{3,5}')
-            invalid_samples.extend(report.loc[~mask, 'sample'].tolist())  # extend list
+
+            invalid_in_report = (
+            report.loc[~mask, 'sample']
+            .dropna()
+            .astype(str)
+            .tolist()
+            )
+
+            invalid_samples.extend(invalid_in_report)
+
+            for s in invalid_in_report:
+                invalid_map[s].add(report_name)
+
+            # Keep only valid samples
             report = report.loc[mask]
-            # print('ENV Report after sample name filter')
-            # print(envs.head())
+
+            # If we find invalid samples then show a popup once all reports have been processed
             if counter == num_reports:
-                msg_text = "The following sample IDs have been indentified as controls and will be removed:\n\n"
-                msg_text += "\n".join(list(set(invalid_samples)))
-                msg = CustomMessageBox("info", msg_text)
-                msg.exec_()
+                if invalid_map: 
+                    lines = []
+                    for sample, runs in sorted(invalid_map.items()):
+                        lines.append(f"<b>{sample}</b> - {', '.join(sorted(runs))}")
+
+                    msg_text = (
+                        "The following sample IDs have been identified as controls "
+                        "and will be removed:<br><br>"
+                        + "<br>".join(lines)
+                    )
+
+                    msg = CustomMessageBox("info", msg_text)
+                    if not msg.ask_confirmation():
+                        self.clear_list()
+                        return
                         
             # Minknow and Piranha version check
             if report['MinKNOWSoftwareVersion'].isnull().any():
@@ -803,4 +850,3 @@ if __name__ == '__main__':
     except Exception as e:
         logging.error("Application initialization failed", exc_info=True)
         print(f"Application failed to start: {str(e)}")
-
