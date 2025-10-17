@@ -12,6 +12,8 @@ from PyQt5.QtWidgets import (
     QFileDialog, QPlainTextEdit, QComboBox, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSizePolicy,
     QStackedLayout
 )
+import json
+import html as html_std
 
 # AUTHORS - Shean Mobed, Matthew Anderson
 # ORG - Biosurv International
@@ -36,17 +38,19 @@ nuitka --onefile --enable-plugins=pyqt5 --include-data-dir=assets=./assets --dis
 
 # CHANGELOG 
 """
-
-V1.5.6 --> V1.5.7 
-- Improved sample regex
-- Added pop-up to ensure the user knows what has been labelled as control
-
 V1.5.7 --> V1.5.8
 - Added run number info to control pop-up and ability to cancel report generation if controls are invalid
 - Added version checking against latest release on GitHub
 
+V1.5.8 --> V1.5.9
+- Improved report styling
+- Removed failed runs from run specific summaries
+- Fixed issue where sample fails were still counted despite a run failing
+- Added support for wild type polioviruses
+- Added country and lab inputs for report
+
 """
-version = '1.5.8'
+version = '1.5.9'
 
 def setup_logging(log_path=None):
     """Set up logging with a rotating file handler."""
@@ -133,10 +137,9 @@ class ListBoxWidget(QListWidget):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.resize(500, 500)
-        self.bg_label = None  # will be set by App
+        self.bg_label = None
 
     def dragEnterEvent(self, event):
-        # Hide bg_label on drag enter
         if hasattr(self, 'bg_label'):
             self.bg_label.hide()
         allowed_extensions = ('.csv', '.xlsx')
@@ -161,12 +164,10 @@ class ListBoxWidget(QListWidget):
         urls = event.mimeData().urls()
         file_paths = [url.toLocalFile() for url in urls if url.toLocalFile().lower().endswith(allowed_extensions)]
         self.addItems(file_paths)
-        # Hide bg_label when files are dropped
         if hasattr(self, 'bg_label'):
             self.bg_label.hide()
 
     def resizeEvent(self, event):
-        # Ensure bg_label always fills the widget
         if self.bg_label is not None:
             self.bg_label.resize(self.size())
         super().resizeEvent(event)
@@ -191,7 +192,7 @@ class App(QMainWindow):
             settings_app="RunReporter",
         )
 
-        # Kick it off (non-blocking). It will show a popup itself if needed.
+        
         self.updater.check_on_startup(parent=self, force=True)
 
         # Central widget and main layout
@@ -201,7 +202,7 @@ class App(QMainWindow):
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(10)
 
-        # Top: Logo, Title, Version
+        # Top
         top_layout = QHBoxLayout()
         self.logo_label = QLabel()
         self.logo_label.setPixmap(QPixmap(os.path.join(os.path.dirname(__file__), 'assets/Logo.png')))
@@ -248,13 +249,38 @@ class App(QMainWindow):
         self.listbox_view.setStyleSheet("background-color:#FAF9F6;border-color:lightgrey;border-style:dashed;border-width:2px;border-radius:10px;")
         self.listbox_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
+        # Country + Lab inputs
+        meta_layout = QHBoxLayout()
+
+        self.country_label = QLabel('Country:')
+        self.country_label.setFont(QFont('Arial', 9))
+        self.country_label.setStyleSheet("background-color:transparent")
+        meta_layout.addWidget(self.country_label)
+
+        self.country_entry = QLineEdit()
+        self.country_entry.setFont(QFont('Arial', 11))
+        self.country_entry.setStyleSheet("background-color:#FAF9F6;border-color:lightgrey;border-style:dashed;border-width:2px;border-radius:10px;")
+        meta_layout.addWidget(self.country_entry, 1)
+
+        self.lab_label = QLabel('Lab:')
+        self.lab_label.setFont(QFont('Arial', 9))
+        self.lab_label.setStyleSheet("background-color:transparent")
+        meta_layout.addWidget(self.lab_label)
+
+        self.lab_entry = QLineEdit()
+        self.lab_entry.setFont(QFont('Arial', 11))
+        self.lab_entry.setStyleSheet("background-color:#FAF9F6;border-color:lightgrey;border-style:dashed;border-width:2px;border-radius:10px;")
+        meta_layout.addWidget(self.lab_entry, 1)
+
+        main_layout.addLayout(meta_layout)
+
         # Overlay label
         self.bg_label = QLabel('Drop CSV or XLSX files here', self.listbox_view)
         self.bg_label.setAlignment(Qt.AlignCenter)
         self.bg_label.setStyleSheet("background:transparent; color: #888; font-size: 18px;")
         self.bg_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.bg_label.setGeometry(0, 0, 1, 1)
-        self.listbox_view.bg_label = self.bg_label  # set for ListBoxWidget
+        self.listbox_view.bg_label = self.bg_label 
 
         dropbox_stack.addWidget(self.listbox_view)
         dropbox_stack.setStackingMode(QStackedLayout.StackAll)
@@ -378,8 +404,8 @@ class App(QMainWindow):
                 'Sabin2-related|classification','Sabin2-related|nt_diff_from_reference',
                 'Sabin3-related|classification','Sabin3-related|nt_diff_from_reference']
         
-        # Removed because of new samples csv format, will leave here in case
-        # 'EmergenceGroupVDPV1','EmergenceGroupVDPV2','EmergenceGroupVDPV3',
+        # WPV columns
+        wpv_cols = ['WPV1|classification', 'WPV2|classification', 'WPV3|classification']
 
         col_rename_dict = {
         'DDNSclassification':'classification',
@@ -389,6 +415,16 @@ class App(QMainWindow):
         invalid_map = defaultdict(set)
         num_reports = len(paths)
         counter = 0
+
+        # Collect per-run HTML panels
+        html_runs = []
+        report_name_list = []
+
+        # Track passed/failed runs for header pills and counting
+        passed_report_names = []
+        failed_runs = []
+
+        run_fail_sample_total = 0  
 
         for path in paths:
             counter += 1
@@ -413,17 +449,22 @@ class App(QMainWindow):
             
             print('REPORT HEAD')
             print(report.head())
-            # print(report.columns)
+            
             
             if report.empty:
                 print(f'Report: {report_name} has been read in as an empty dataframe')
                 continue
             
-            text += f'\nFor run: {report_name}, these results were found:\n'
-            html += f'\n<h3>For run: <b><mark>{report_name}</mark></b>, these results were found:</h3>\n'
+            # Start per-run HTML
+            run_html = f'''
+            <div class="panel-inner">
+                <h3>Run: <span class="run-name">{html_std.escape(report_name)}</span></h3>
+            '''
+    
             
             vdpv_found = False
             sabin_found = False
+            wpv_found = False 
 
             # Column presence check
             missing_cols = []
@@ -453,39 +494,60 @@ class App(QMainWindow):
             fail_CP_contaminated = report['sample'].str.startswith("CP") & ((report['Sabin1-related|num_reads'] > 50) | (report['Sabin2-related|num_reads'] > 50) | (report['Sabin3-related|num_reads'] > 50))
             fail_CN_contaminated = report['sample'].str.startswith("CN") & ((report['Sabin1-related|num_reads'] > 50) | (report['Sabin2-related|num_reads'] > 50) | (report['Sabin3-related|num_reads'] > 50))
 
-            # If any sample meets failure criteria, mark the entire DataFrame as 'Fail'
+            # RunQC detection
+            run_failed = False
+            run_fail_reason = None
+
             if fail_CP_negative.any():
-                print("Negative Positive Control")
+                run_failed = True
+                run_fail_reason = 'Negative Positive Control'
+                report['RunQC'] = 'Fail'
                 text += 'This run has failed its RunQC, due to a Negative Positive Control\n'
-                html += '<p><b><mark>This run has failed its RunQC, due to a Negative Positive Control</mark></b></p>\n'
-                report['RunQC'] = 'Fail'
-                
+                run_html += '<p><b><mark>This run has failed its RunQC, due to a Negative Positive Control</mark></b></p>\n'
+
             elif fail_CP_contaminated.any():
+                run_failed = True
+                run_fail_reason = 'Contaminated Positive Control'
+                report['RunQC'] = 'Fail'
                 text += 'This run has failed its RunQC, due to a Contaminated Positive Control\n'
-                html += '<p><b><mark>This run has failed its RunQC, due to a Contaminated Positive Control</mark></b></p>\n'
-                report['RunQC'] = 'Fail'
-                
+                run_html += '<p><b><mark>This run has failed its RunQC, due to a Contaminated Positive Control</mark></b></p>\n'
+
             elif fail_CN_contaminated.any():
-                text += 'This run has failed its RunQC, due to a Contaminated Negative Control\n'
-                html += '<p><b><mark>This run has failed its RunQC, due to a Contaminated Negative Control</mark></b></p>\n'
+                run_failed = True
+                run_fail_reason = 'Contaminated Negative Control'
                 report['RunQC'] = 'Fail'
-                
-            # Run not processed if RunQC failed and adds message to report, set sampleQC to Fail for counts
-            elif 'Fail' in report['RunQC'].values:
-                print('RunQC Fail')
-                report['SampleQC'] = 'Fail'
+                text += 'This run has failed its RunQC, due to a Contaminated Negative Control\n'
+                run_html += '<p><b><mark>This run has failed its RunQC, due to a Contaminated Negative Control</mark></b></p>\n'
+
+            elif 'Fail' in report['RunQC'].fillna('').str.title().values:
+                run_failed = True
+                run_fail_reason = 'Run flagged as Fail in report metadata'
+
+            # If the run failed record reason
+            if run_failed:
+                failed_runs.append((report_name, run_fail_reason))
+
+                # Include true samples
+                standard_mask = report['sample'].astype(str).str.match(r'^[A-Z]{3}[/-]\d{2}[/-]\d{3,5}')
+                env_mask = report['sample'].astype(str).str.match(r'^ENV-[A-Z]{3}[/-]\d{2}[/-]\d{3,5}')
+                valid_sample_mask = standard_mask | env_mask
+
+                n_samples = report.loc[valid_sample_mask, 'sample'].dropna().astype(str).nunique()
+
+                run_fail_sample_total += int(n_samples)
+                continue
+
+            passed_report_names.append(report_name)
             
-            # filter off envs for different processing
             envs = report.loc[report['sample'].str.match(r'^ENV-[A-Z]{3}[/-]\d{2}[/-]\d{3,5}')]
 
-            # Remove controls from df using regex
             mask = report['sample'].str.match(r'^[A-Z]{3}[/-]\d{2}[/-]\d{3,5}')
 
             invalid_in_report = (
-            report.loc[~mask, 'sample']
-            .dropna()
-            .astype(str)
-            .tolist()
+                report.loc[~mask, 'sample']
+                .dropna()
+                .astype(str)
+                .tolist()
             )
 
             invalid_samples.extend(invalid_in_report)
@@ -496,7 +558,6 @@ class App(QMainWindow):
             # Keep only valid samples
             report = report.loc[mask]
 
-            # If we find invalid samples then show a popup once all reports have been processed
             if counter == num_reports:
                 if invalid_map: 
                     lines = []
@@ -526,43 +587,60 @@ class App(QMainWindow):
             if report.EPID.isnull().any():
                 QMessageBox.warning(self, 'Warning', f'Missing EPIDs in {report_name}')
                 text += 'This run has missing EPIDs, please complete report!\n'
-                html += '<p><b><mark>This run has missing EPIDs, please complete report!</mark></b></p>\n'
-                return
+                run_html += '<p><b><mark>This run has missing EPIDs, please complete report!</mark></b></p>\n'
+                run_html += '</div>'
+                html_runs.append(run_html)
+                continue
 
-            # Filter for QC and Sample Passes, fill empty cells with empty string to not cause attribute error
+            # Filter for QC and Sample Passes
             report['RunQC'] = report['RunQC'].fillna('').str.strip().str.title()
             report['SampleQC'] = report['SampleQC'].fillna('').str.strip().str.title()
             
-            # Set to upper to find typos
+            
             report['classification'] = report['classification'].str.upper().str.strip()
             
             if report.empty:
                 text += f'Completely negative.\n'
-                html += f'Completely negative</p>\n'
+                run_html += f'<p>Completely negative</p>\n'
                 print('Negative Report')
+                run_html += '</div>'
+                html_runs.append(run_html)
                 continue
                 
             # Standardising DDNS Classification for report
             def classify(row):
+                
+                def val(col):
+                    return str(row.get(col, '')).strip().upper()
+
                 classifications = []
-                if row['Sabin1-related|classification'] == 'Sabin-like':
+                
+                if val('Sabin1-related|classification') == 'SABIN-LIKE':
                     classifications.append('SABIN1')
-                elif row['Sabin1-related|classification'] == 'VDPV':
+                elif val('Sabin1-related|classification') == 'VDPV':
                     classifications.append('VDPV1')
 
-                if row['Sabin2-related|classification'] == 'Sabin-like':
+                if val('Sabin2-related|classification') == 'SABIN-LIKE':
                     classifications.append('SABIN2')
-                elif row['Sabin2-related|classification'] == 'VDPV':
+                elif val('Sabin2-related|classification') == 'VDPV':
                     classifications.append('VDPV2')
 
-                if row['Sabin3-related|classification'] == 'Sabin-like':
+                if val('Sabin3-related|classification') == 'SABIN-LIKE':
                     classifications.append('SABIN3')
-                elif row['Sabin3-related|classification'] == 'VDPV':
+                elif val('Sabin3-related|classification') == 'VDPV':
                     classifications.append('VDPV3')
+
+                
+                if val('WPV1|classification') == 'WPV1':
+                    classifications.append('WPV1')
+                if val('WPV2|classification') == 'WPV2':
+                    classifications.append('WPV2')
+                if val('WPV3|classification') == 'WPV3':
+                    classifications.append('WPV3')
 
                 return '+'.join(classifications) if classifications else 'Negative'
 
-            # Apply the classify function to each row
+        
             report['classification'] = report.apply(classify, axis=1)
             
             # Counts number of EPIDs that are negative
@@ -574,7 +652,7 @@ class App(QMainWindow):
             
             # Summary counts for fails
             ddns_sample_fail = report.loc[report['SampleQC'] ==  'Fail']
-            ddns_run_fail = report.loc[report['RunQC'] ==  'Fail']
+            ddns_run_fail = report.loc[report['RunQC'] ==  'Fail'] 
 
             # Summary counts for passes
             ddns_pass = report.loc[report['SampleQC'] ==  'Pass']
@@ -582,171 +660,234 @@ class App(QMainWindow):
             print('Checking QC values')
             print(report[['RunQC','SampleQC']].value_counts())
             
-            # Adding to totals pass and fails
+            # Adding to totals for non-failed runs
             ddns_total_pass = pd.concat([ddns_total_pass, ddns_pass], join='inner')
             ddns_total_sample_fail = pd.concat([ddns_total_sample_fail, ddns_sample_fail], join='inner')
-            ddns_total_run_fail = pd.concat([ddns_total_run_fail, ddns_run_fail], join='inner')
-
-            text += f'\nSummary count for run {report_name}\n'
-            html += f'\n<h4>Summary count for run {report_name}</h4>'
             
-            # Creating counts table
-            table = pd.concat([ddns_pass.classification.value_counts(), ddns_sample_fail.classification.value_counts(), ddns_run_fail.classification.value_counts()], axis=1, ignore_index=False, keys=['Pass','Sample Fail','Run Fail']).fillna(0).astype(int).sort_index().reset_index(names=f'{report_mode} Classification')
-            table.loc[len(table.index)] = ['Total', table['Pass'].sum(), table['Sample Fail'].sum(), table['Run Fail'].sum()] # Add total row
+
+            table = pd.concat(
+                [
+                    ddns_pass.classification.value_counts(),
+                    ddns_sample_fail.classification.value_counts()
+                ],
+                axis=1, keys=['Pass', 'Sample Fail']
+            ).fillna(0).astype(int).sort_index().reset_index(names=f'{report_mode} Classification')
+
+            table.loc[len(table.index)] = [
+                'Total',
+                int(table['Pass'].sum()),
+                int(table['Sample Fail'].sum())
+            ]
 
             text += (table.to_string(index=False, justify='left') + '\n\n')
-            html += (table.to_html(index=False) + '\n')
+            run_html += (table.to_html(index=False, classes="compact striped") + '\n')
             
-            # Splitting on the + and create duplicate row below with explode
             if not report[report['classification'].str.contains('\\+', na=False)].empty:
                 combos = report[report['classification'].str.contains('\\+', na=False)]
                 combos.loc[:,'classification'] = combos['classification'].str.split("\\+")
                 combos = combos.explode('classification')
                 report = pd.concat([report,combos])
 
-            # DDNS sample summariser
+            # DDNS sample summariser (VDPV)
+            vdpv_sections_html = []
             for ddns_type in ['VDPV1', 'VDPV2', 'VDPV3']:
-                # Selecting VDPV    
-                ddns_report = report.loc[(report['classification'] == ddns_type)& (report['SampleQC'] == 'Pass')]         
-                if not ddns_report.empty:
-                    vdpv_found = True
-                    #print('Found VDPV')
-                    text += f'Samples with at least {10 if ddns_type == "VDPV1" or ddns_type == "VDPV3" else 6} VP1 nt differences compared to Sabin {ddns_type[-1]} that can be reported.\n'
-                    html += f'<p>Samples with at least {10 if ddns_type == "VDPV1" or ddns_type == "VDPV3" else 6} VP1 nt differences compared to Sabin {ddns_type[-1]} that can be reported.</p>\n<ul>'
-                    
-                    for EPID in set(ddns_report['EPID'].dropna().values):
-                        # Grab EPID row and nt diff info
-                        epid_row = ddns_report[ddns_report['EPID'] == EPID]                        
-                        nt_diff = int(epid_row[f'Sabin{ddns_type[-1]}-related|nt_diff_from_reference'].dropna().values[0])
-                        
-                        # Lineage extraction
-                        # epid_row['lineage'] = epid_row['EmergenceGroupVDPV1'].combine_first(epid_row['EmergenceGroupVDPV2']).combine_first(epid_row['EmergenceGroupVDPV3'])
-                        # epid_row['lineage'] = epid_row['lineage'].fillna('').astype('str').str.strip()
-                        
-                        # Grab emergence group info
-                        # if epid_row['lineage'].ne('').all():
-                        #     lineage = epid_row['lineage'].unique()[0].upper()
-                        # else:
-                            # lineage = 'LINEAGE_HERE' # Placeholder if empty
+                ddns_report = report.loc[
+                    (report['classification'] == ddns_type) &
+                    (report['SampleQC'] == 'Pass')
+                ]
+                if ddns_report.empty:
+                    continue
 
-                        # since the latest DDNS headers have removed the emergence group columns, lineage will be set to UNKNOWN
-                        lineage = 'UNKNOWN'
-                        
-                        # Handles pairs
-                        if len(epid_row[ddns_report.columns[0]].values) == 2:
-                            text += f'•\t{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
-                            html += f'<li>{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
-                        # Handles loner sample
-                        else:
-                            text += f'•\t{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
-                            html += f'<li>\t{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
+                vdpv_found = True
+                diff_limit = 10 if ddns_type in ('VDPV1', 'VDPV3') else 6
 
-                        # GPEI statement
-                        text += f'Genetically related to {lineage}. This sample is immediately classified as {ddns_type} as described in GPEI Guidelines for reporting and Classification of Vaccine-derived Polioviruses.\n\n'
-                        html += f'Genetically related to <b><mark>{lineage}</mark></b>. This sample is immediately classified as <b><mark>{ddns_type}</mark></b> as described in GPEI Guidelines for reporting and Classification of Vaccine-derived Polioviruses.\n\n'
-                
-                # Stops trailing end list characters from loops, for nicer looking html
-                if html[-5:] == "</ul>":
-                    html += ''
-                else:
-                    html += '</ul>'
-                    
-            if html[-5:] == "</ul>":
-                html += ''
-            else:
-                html += '</ul>'
+                section_html = (
+                    f'<p><b>Samples with at least {diff_limit} VP1 nt differences compared to '
+                    f'Sabin {ddns_type[-1]} that can be reported:</b></p>\n<ul>'
+                )
+                text += (
+                    f'Samples with at least {diff_limit} VP1 nt differences compared to '
+                    f'Sabin {ddns_type[-1]} that can be reported.\n'
+                )
+
+                for EPID in sorted(set(ddns_report['EPID'].dropna().values)):
+                    epid_row = ddns_report[ddns_report['EPID'] == EPID]
+                    nt_diff = int(
+                        epid_row[f'Sabin{ddns_type[-1]}-related|nt_diff_from_reference']
+                        .dropna().values[0]
+                    )
+                    lineage = 'UNKNOWN'
+
+                    names = list(epid_row[ddns_report.columns[0]].values)
+                    if len(names) == 2:
+                        bullet = f'{EPID} ({names[0]}, {names[1]}): {nt_diff} nucleotide differences.'
+                    else:
+                        bullet = f'{EPID} ({names[0]}): {nt_diff} nucleotide differences.'
+
+                    section_html += (
+                        f'<li>{bullet} '
+                        f'<span class="muted">Genetically related to <span class="hi-red">{lineage}</span>. '
+                        f'Immediately classified as <span class="hi-red">{ddns_type}</span> as described in GPEI Guidelines for reporting and classification of Vaccine-derived Polioviruses.</span></li>\n'
+                    )
+
+                    text += f'•\t{bullet}\n'
+                    text += (
+                        f'Genetically related to {lineage}. This sample is immediately classified as '
+                        f'{ddns_type} as described in GPEI Guidelines for reporting and classification of '
+                        f'Vaccine-derived Polioviruses.\n\n'
+                    )
+
+                section_html += '</ul>'
+                vdpv_sections_html.append(section_html)
+
+            if vdpv_sections_html:
+                run_html += '\n'.join(vdpv_sections_html)
             
-            # Prints text if No VDPVs present
             if not vdpv_found:
                 text += f"\nNo VDPVs to report were found\n"     
-                html += f"<p>No VDPVs to report were found</p>\n"    
+                run_html += f"<p>No VDPVs to report were found</p>\n"    
             
-            # Displaying Sabin positive values
-            if  report_mode == 'DDNS':
+            # Sabin positives
+            if report_mode == 'DDNS':
+                sabin_html_sections = []
                 for ddns_type in ['SABIN1', 'SABIN2', 'SABIN3']:
-                    # Selecting Sabin
-                    ddns_report = report.loc[(report['classification'] == ddns_type) & (report['SampleQC'] == 'Pass')]
+                    ddns_report = report.loc[
+                        (report['classification'] == ddns_type) &
+                        (report['SampleQC'] == 'Pass')
+                    ]
                     if not ddns_report.empty:
                         sabin_found = True
-                        text += f'\nSamples with less than {10 if ddns_type == "SABIN1" or ddns_type == "SABIN3" else 6} VP1 nt differences compared to Sabin{ddns_type[-1]} that can be reported:\n'
-                        html += f'<p>Samples with less than {10 if ddns_type == "SABIN1" or ddns_type == "SABIN3" else 6} VP1 nt differences compared to Sabin{ddns_type[-1]} that can be reported:<p/>\n<ul>'
+                        diff_limit = 10 if ddns_type in ['SABIN1', 'SABIN3'] else 6
+                        section = f'<p><b>Samples with less than {diff_limit} VP1 nt differences compared to {ddns_type.title()} that can be reported:</b></p>\n<ul>'
+                        text += f'\nSamples with less than {diff_limit} VP1 nt differences compared to {ddns_type.title()} that can be reported:\n'
 
-                        for EPID in set(ddns_report['EPID'].dropna().values):
-                            # Grab EPID row and nt diff info
+                        for EPID in sorted(set(ddns_report['EPID'].dropna().values)):
                             epid_row = ddns_report[ddns_report['EPID'] == EPID]
                             nt_diff = int(epid_row[f'Sabin{ddns_type[-1]}-related|nt_diff_from_reference'].dropna().values[0])
-                            
-                            # Handles pairs
-                            if len(epid_row[ddns_report.columns[0]].values) == 2:
-                                text += f'•\t{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
-                                html += f'<li>{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}, {epid_row[ddns_report.columns[0]].values[1]}): {nt_diff} nucleotide differences.\n'
-                            
-                            # Handles loner sample
-                            else:
-                                text += f'•\t{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
-                                html += f'<li>{epid_row["EPID"].values[0]} ({epid_row[ddns_report.columns[0]].values[0]}): {nt_diff} nucleotide differences.\n'
-                    # Stops trailing end list characters from loops, for nicer looking html
-                    if html[-5:] == "</ul>":
-                        html += ''
-                    else:
-                        html += '</ul>'
-                        
-                if html[-5:] == "</ul>":
-                    html += ''
-                else:
-                    html += '</ul>'
-            
-                # No Sabin statement
-                if not sabin_found:
-                    text += f"No Sabins to report were found\n" 
-                    html += f"<p>No Sabins to report were found</p>\n"
-            
-            print(envs[['sample','classification','SampleQC']])
-            
-            # ENV sample summariser
-            for ddns_type in ['VDPV1', 'VDPV2', 'VDPV3']:
-                # Selecting VDPV    
-                env_report = envs.loc[(envs['classification'] == ddns_type) & (envs['SampleQC'] == 'Pass')]       
-                if not env_report.empty:
-                    vdpv_found = True
-                    #print('Found VDPV')
-                    text += f'\nEnvironmental Samples with at least {10 if ddns_type == "VDPV1" or ddns_type == "VDPV3" else 6} VP1 nt differences compared to Sabin {ddns_type[-1]} that can be reported.\n'
-                    html += f'<p>Environmental Samples Samples with at least {10 if ddns_type == "VDPV1" or ddns_type == "VDPV3" else 6} VP1 nt differences compared to Sabin {ddns_type[-1]} that can be reported.</p>\n<ul>'
-                    
-                    for s in set(env_report['sample'].dropna().values):
-                        # Grab EPID row and nt diff info
-                        s_row = env_report[env_report['sample'] == s]
-                        print(s_row)                     
-                        nt_diff = int(s_row[f'Sabin{ddns_type[-1]}-related|nt_diff_from_reference'].dropna().values[0])
-                        
-                        # Lineage extraction
-                        # s_row['lineage'] = s_row['EmergenceGroupVDPV1'].combine_first(s_row['EmergenceGroupVDPV2']).combine_first(s_row['EmergenceGroupVDPV3'])
-                        # s_row['lineage'] = s_row['lineage'].fillna('').astype('str').str.strip()
-                        
-                        # # Grab emergence group info
-                        # if s_row['lineage'].ne('').all():
-                        #     lineage = s_row['lineage'].unique()[0].upper()
-                        # else:
-                        #     lineage = 'LINEAGE_HERE' # Placeholder if empty
-                        lineage = 'UNKNOWN'
-                        
-                        text += f'•\t{s_row[env_report.columns[0]].values[0]}: {nt_diff} nucleotide differences.\n'
-                        html += f'<li>\t{s_row[env_report.columns[0]].values[0]}: {nt_diff} nucleotide differences.\n'
 
-                        # GPEI statement
-                        text += f'Genetically related to {lineage}. This sample is immediately classified as {ddns_type} as described in GPEI Guidelines for reporting and Classification of Vaccine-derived Polioviruses.\n\n'
-                        html += f'Genetically related to <b><mark>{lineage}</mark></b>. This sample is immediately classified as <b><mark>{ddns_type}</mark></b> as described in GPEI Guidelines for reporting and Classification of Vaccine-derived Polioviruses.\n\n'
-                
-                # Stops trailing end list characters from loops, for nicer looking html
-                if html[-5:] == "</ul>":
-                    html += ''
+                            names = list(epid_row[ddns_report.columns[0]].values)
+                            if len(names) == 2:
+                                bullet = f'{EPID} ({names[0]}, {names[1]}): {nt_diff} nucleotide differences.'
+                            else:
+                                bullet = f'{EPID} ({names[0]}): {nt_diff} nucleotide differences.'
+
+                            section += f'<li>{bullet}</li>\n'
+                            text += f'•\t{bullet}\n'
+                        section += '</ul>'
+                        sabin_html_sections.append(section)
+
+                if sabin_html_sections:
+                    run_html += '\n'.join(sabin_html_sections)
                 else:
-                    html += '</ul>'
+                    text += "No Sabins to report were found\n"
+                    run_html += "<p>No Sabins to report were found</p>\n"
+
+            # Wild Poliovirus (WPV1/2/3)
+            wpv_sections_html = []
+            for wpv_type in ['WPV1', 'WPV2', 'WPV3']:
+                wpv_report = report.loc[
+                    (report['classification'] == wpv_type) &
+                    (report['SampleQC'] == 'Pass')
+                ]
+                if wpv_report.empty:
+                    continue
+
+                wpv_found = True
+
                 
-            if html[-5:] == "</ul>":
-                html += ''
-            else:
-                html += '</ul>'
+                section_html = (
+                    f'<p><b>Samples detected as {wpv_type} (wild poliovirus) that can be reported:</b></p>\n<ul>'
+                )
+                text += f'Samples detected as {wpv_type} (wild poliovirus) that can be reported.\n'
+
+                for EPID in sorted(set(wpv_report['EPID'].dropna().values)):
+                    epid_row = wpv_report[wpv_report['EPID'] == EPID]
+                    names = list(epid_row[wpv_report.columns[0]].values)
+                    if len(names) == 2:
+                        sample_str = f'{EPID} ({names[0]}, {names[1]})'
+                    else:
+                        sample_str = f'{EPID} ({names[0]})'
+
+                    section_html += (
+                        f'<li>{sample_str}. '
+                    )
+                    text += f'•\t{sample_str}\n'
+
+                section_html += '</ul>'
+                wpv_sections_html.append(section_html)
+
+            if wpv_sections_html:
+                run_html += '\n'.join(wpv_sections_html)
+
+            # ENV sample summariser (VDPV)
+            env_sections_html = []
+            for ddns_type in ['VDPV1', 'VDPV2', 'VDPV3']:
+                env_report = envs.loc[(envs['classification'] == ddns_type) & (envs['SampleQC'] == 'Pass')]
+                if env_report.empty:
+                    continue
+
+                vdpv_found = True
+                diff_limit = 10 if ddns_type in ('VDPV1', 'VDPV3') else 6
+
+                section_html = (
+                    f'<p><b>Environmental samples with at least {diff_limit} VP1 nt differences '
+                    f'compared to Sabin {ddns_type[-1]} that can be reported:</b></p>\n<ul>'
+                )
+                text += (
+                    f'\nEnvironmental samples with at least {diff_limit} VP1 nt differences compared '
+                    f'to Sabin {ddns_type[-1]} that can be reported:\n'
+                )
+
+                for s in sorted(set(env_report['sample'].dropna().values)):
+                    s_row = env_report[env_report['sample'] == s]
+                    nt_diff = int(s_row[f'Sabin{ddns_type[-1]}-related|nt_diff_from_reference'].dropna().values[0])
+                    lineage = 'UNKNOWN'
+
+                    section_html += (
+                        f'<li>{s}: {nt_diff} nucleotide differences. '
+                        f'<span class="muted">Genetically related to <span class="hi-red">{lineage}</span>. '
+                        f'Immediately classified as <span class="hi-red">{ddns_type}</span> as described in GPEI Guidelines for reporting and classification of Vaccine-derived Polioviruses.</span></li>\n'
+                    )
+
+                    text += f'•\t{s}: {nt_diff} nucleotide differences.\n'
+                    text += (
+                        f'Genetically related to {lineage}. This sample is immediately classified as '
+                        f'{ddns_type} as described in GPEI Guidelines for reporting and Classification of '
+                        f'Vaccine-derived Polioviruses.\n\n'
+                    )
+
+                section_html += '</ul>'
+                env_sections_html.append(section_html)
+
+            if env_sections_html:
+                run_html += '\n'.join(env_sections_html)
+
+            # ENV Wild Poliovirus
+            env_wpv_sections_html = []
+            for wpv_type in ['WPV1', 'WPV2', 'WPV3']:
+                env_wpv = envs.loc[(envs['classification'] == wpv_type) & (envs['SampleQC'] == 'Pass')]
+                if env_wpv.empty:
+                    continue
+
+                wpv_found = True
+                section_html = (
+                    f'<p><b>Environmental samples detected as {wpv_type} (wild poliovirus) that can be reported:</b></p>\n<ul>'
+                )
+                text += f'\nEnvironmental samples detected as {wpv_type} (wild poliovirus) that can be reported:\n'
+
+                for s in sorted(set(env_wpv['sample'].dropna().values)):
+                    section_html += (
+                        f'<li>{s}. <span class="muted">Immediately classified as '
+                        f'<span class="hi-red">{wpv_type}</span> per GPEI guidelines.</span></li>\n'
+                    )
+                    text += f'•\t{s}\n'
+                    text += f'Immediately classified as {wpv_type} per GPEI guidelines.\n\n'
+
+                section_html += '</ul>'
+                env_wpv_sections_html.append(section_html)
+
+            if env_wpv_sections_html:
+                run_html += '\n'.join(env_wpv_sections_html)
                 
                 
             # Minknow and Piranha statement
@@ -756,6 +897,7 @@ class App(QMainWindow):
                 print('Tried to get minknow versions')
                 print(report_name)
                 print(report)
+                minknow_ver = "Unknown"
                 
             try:
                 piranha_ver = report['AnalysisPipelineVersion'].unique()[0]
@@ -763,67 +905,223 @@ class App(QMainWindow):
                 print('Tried to get piranha versions')
                 print(report_name)
                 print(report)
+                piranha_ver = "Unknown"
                 
-            html += f"Minknow version {minknow_ver} and Piranha version {piranha_ver} was used to generate the data reported here\n"
-                
-            # Stating number of negative EPIDs
+            # Number of negatives
             text += f'\nNumber of Negative EPIDs: {neg_epid_count.values[0]}\n'
-            html += f'\n<p>Number of Negative EPIDs: {neg_epid_count.values[0]}</p>' 
+            run_html += f'\n<p><b>Number of Negative EPIDs:</b> {neg_epid_count.values[0]}</p>'
+            run_html += f"<p class='muted small'>MinKNOW {html_std.escape(str(minknow_ver))} &middot; Piranha {html_std.escape(str(piranha_ver))}</p>\n"
 
-        # Totals, applied in reverse order since adding to the top of text
-        total_table = pd.concat([ddns_total_pass.classification.value_counts(), ddns_total_sample_fail.classification.value_counts(), ddns_total_run_fail.classification.value_counts()], axis=1, ignore_index=False, keys=['Pass','Sample Fail','Run Fail']).fillna(0).astype(int).sort_index().reset_index(names=f'{report_mode} Classification')
-        print(total_table)
-        # table with negs
+            run_html += '</div>'
+            html_runs.append(run_html)
+
+        # summary table
+        total_pass = ddns_total_pass.classification.value_counts()
+        total_sample_fail = ddns_total_sample_fail.classification.value_counts()
+
+        total_table = pd.concat(
+            [total_pass, total_sample_fail],
+            axis=1, keys=['Pass', 'Sample Fail']
+        ).fillna(0).astype(int).sort_index().reset_index(names=f'{report_mode} Classification')
+
+        total_table['Run Fail'] = '-' 
+
         total_table_no_neg = total_table[total_table[f'{report_mode} Classification'] != 'Negative']
-        
-        # total row appended
-        total_table.loc[len(total_table.index)] = ['Total', total_table['Pass'].sum(), total_table['Sample Fail'].sum(), total_table['Run Fail'].sum()] # Add total row
-        
-        # total - neg row appended
-        total_table.loc[len(total_table.index)] = ['Total (Negatives excluded)', total_table_no_neg['Pass'].sum(), total_table_no_neg['Sample Fail'].sum(), total_table_no_neg['Run Fail'].sum()]
+        run_fail_total = run_fail_sample_total
 
-        
+        total_row = pd.DataFrame([{
+            f'{report_mode} Classification': 'Total',
+            'Pass': int(total_table['Pass'].sum()),
+            'Sample Fail': int(total_table['Sample Fail'].sum()),
+            'Run Fail': run_fail_total
+        }])
+
+        total_row_nonneg = pd.DataFrame([{
+            f'{report_mode} Classification': 'Total (Negatives excluded)',
+            'Pass': int(total_table_no_neg['Pass'].sum()),
+            'Sample Fail': int(total_table_no_neg['Sample Fail'].sum()),
+            'Run Fail': '-'
+        }])
+
+        total_table = pd.concat([total_table, total_row, total_row_nonneg], ignore_index=True)
+
         text = (total_table.to_string(index=False, justify='left') + '\n') + text
         text = 'Summary count table for all runs\n' + text
-        
-        html = (total_table.to_html(index=False) + '\n') + html
-        html = '<h2>Summary count table for all Runs</h2>' + html
-        
-        # Run list at beginning of report
-        text = "\n" + text
-        html = "</ul>\n" + html
-        
-        for path in reversed(paths):
-            report_name = path.rsplit('/')[-1].rsplit('_',3)[0]
-            text = f"\t• {report_name}\n" + text
-            html = f"<li>{report_name}\n" + html
-                        
-        text = "Runs present in this report:\n" + text
-        html = "Runs present in this report:\n<ul>" + html
-        
-        #Title
+
+        runs_html = ''.join(html_runs) 
+
+        # Summary table
+        summary_html = '<h2>Summary count table for all Runs</h2>' + total_table.to_html(index=False, classes="summary compact striped")
+
+        # Vertical run index pills
+        runs_index_html = ''
+        if report_name_list:
+            all_runs = []
+            for n in passed_report_names:
+                all_runs.append((n, "pass", None))
+            for (n, reason) in failed_runs:
+                all_runs.append((n, "fail", reason))
+
+            # Sort by run name
+            all_runs.sort(key=lambda x: x[0])
+
+            # Render pills
+            pills_html = ""
+            for n, status, reason in all_runs:
+                if status == "fail":
+                    pills_html += (
+                        f'<span class="pill failed" title="{html_std.escape(reason)}">'
+                        f'{html_std.escape(n)} &middot; <strong>INVALID RUN:</strong> {html_std.escape(reason)}'
+                        f'</span>'
+                    )
+                else:
+                    pills_html += f'<span class="pill">{html_std.escape(n)}</span>'
+
+            runs_index_html = (
+                f'<div class="run-index">'
+                f'<div class="muted small">Runs in this report:</div>'
+                f'{pills_html}</div>'
+            )
+
+        # Title & file name
         if len(report_name_list) > 1:
-            text = f"DDNS Report for Runs {report_name_list[0]} to {report_name_list[-1]}\n\n" + text
-            html = f"<h1>DDNS REPORT FOR RUNS {report_name_list[0]} TO {report_name_list[-1]}</h1>" + html
+            title_text = f"DDNS REPORT FOR RUNS {report_name_list[0]} TO {report_name_list[-1]}"
             html_file_output = f"{destination_path}/{report_mode}_report_{report_name_list[0]}_to_{report_name_list[-1]}.html"
         else:
-            text = f"DDNS Report For Run {report_name_list[0]}\n\n" + text
-            html = f"<h1>DDNS REPORT FOR RUN {report_name_list[0]}</h1>" + html
+            title_text = f"DDNS REPORT FOR RUN {report_name_list[0]}"
             html_file_output = f"{destination_path}/{report_mode}_report_{report_name_list[0]}.html"
-        
-        # Acknowledgments
-        html += "<p>These data were produced using polio sequencing <a href='https://www.protocols.io/workspaces/poliovirus-sequencing-consortium/about'>Protocols</a> and analysis <a href='https://github.com/polio-nanopore/piranha'>software</a> developed by the <a href='https://polionanopore.org/about.html'>Polio Sequencing Consortium</a></p>"        
-        # Setting Style header for Report      
-        html = "<html>\n<head>\n<style>\n\n\ttable {margin: 40px;}\n\tth {background-color: #00008B;color: white;}\n\ttable, th, td {border-collapse: collapse; padding: 5px;}\n\tmark {background-color: white;color: red;}\n\n</style>\n</head>\n<body>" + html + "\n</body>\n</html>"
-        
+
+        # Country/Lab
+        country = (self.country_entry.text() or "").strip()
+        lab = (self.lab_entry.text() or "").strip()
+
+        subtitle_bits = []
+        if country:
+            subtitle_bits.append(html_std.escape(country))
+        if lab:
+            subtitle_bits.append(html_std.escape(lab))
+
+        subtitle_html = ""
+        if subtitle_bits:
+            subtitle_html = f"""<div class="subtitle">{' <span class="dot">&middot;</span> '.join(subtitle_bits)}</div>"""
+
+        # Title block
+        title_html = f"""
+        <header class="page-header">
+        <h1 class="title">{html_std.escape(title_text)}</h1>
+        {subtitle_html}
+        </header>
+        """
+
+        ack = ("<p class='muted'>These data were produced using polio sequencing "
+            "<a href='https://www.protocols.io/workspaces/poliovirus-sequencing-consortium/about'>Protocols</a> "
+            "and analysis <a href='https://github.com/polio-nanopore/piranha'>software</a> developed by the "
+            "<a href='https://polionanopore.org/about.html'>Polio Sequencing Consortium</a>.</p>")
+
+        # theme and page wrapper
+        html = f"""<html>
+        <head>
+        <meta charset="utf-8">
+        <style>
+        :root{{
+            --ink:#111827; --muted:#6b7280; --brand:#0b5fff;
+            --card:#f8fafc; --border:#e5e7eb; --accent:#eef2ff;
+            --thead:#111827; --thead-text:#fff;
+        }}
+        html,body{{margin:0;padding:0;background:#fff;color:var(--ink);}}
+        body{{
+            font: 15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";
+            max-width: 1100px; margin: 24px auto; padding: 0 16px;
+        }}
+        h1{{font-size:28px; margin: 0 0 16px;}}
+        h2{{font-size:22px; margin: 28px 0 8px; border-bottom:1px solid var(--border); padding-bottom:6px;}}
+        h3{{font-size:18px; margin: 20px 0 8px;}}
+        p{{margin:10px 0;}}
+        .muted{{ color: var(--muted); }}
+        .small{{ font-size: 12px; }}
+        mark{{ background: var(--accent); color:#b91c1c; padding:0 3px; border-radius:2px; }}
+
+        /* Vertical run index pills */
+        .run-index{{ display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin: 8px 0 16px; }}
+        .pill{{ display:inline-block; background:#fff; border:1px solid var(--border); padding:6px 12px; border-radius:999px; }}
+        .pill.failed{{ background:#fee2e2; border-color:#fecaca; color:#991b1b; }}
+        .run-name{{ color: var(--brand); }}
+
+        /* Panel card */
+        .panel-inner{{
+            background: var(--card);
+            border:1px solid var(--border);
+            border-radius:12px;
+            margin: 12px 0 18px;
+            padding: 14px 16px 18px;
+            box-shadow: 0 1px 2px rgba(0,0,0,.03);
+        }}
+
+        /* Highlighted red text */
+        .hi-red {{ color:#b91c1c; font-weight:700; }}
+
+        /* Tables */
+        table{{ border-collapse: collapse; width: 100%; margin: 12px 0; }}
+        th, td{{ border:1px solid var(--border); padding:8px 10px; text-align:left; vertical-align:top; }}
+        th{{ background:var(--thead); color:var(--thead-text); position:sticky; top:44px; z-index:5; }}
+        tr:nth-child(even){{ background:#f9fafb; }}
+        table.compact td, table.compact th{{ padding:6px 8px; }}
+        table.striped tr:nth-child(even){{ background:#f6f7fb; }}
+        table.summary tr:last-child td{{ font-weight:700; background:#dbeafe; }}
+        table.summary {{ background: #f0f7ff; border: 1px solid #bfdbfe; }}
+        table.summary th {{ background: #2563eb; color: #fff; }}
+
+        /* Page header */
+        .page-header {{ margin: 6px 0 14px; }}
+        .title {{
+        font-size: 34px;
+        line-height: 1.2;
+        margin: 0;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: #0f172a; /* slate-900 */
+        }}
+        /* subtle accent underline */
+        .title::after {{
+        content: "";
+        display: block;
+        width: 72px;
+        height: 4px;
+        border-radius: 999px;
+        margin-top: 8px;
+        background: linear-gradient(90deg, var(--brand), #93c5fd);
+        }}
+
+        .subtitle {{
+        margin-top: 6px;
+        font-size: 15px;
+        color: var(--muted);
+        }}
+        .subtitle .dot {{
+        margin: 0 8px;
+        opacity: .6;
+        }}
+
+        a{{ color:var(--brand); text-decoration:none; }}
+        a:hover{{ text-decoration:underline; }}
+        </style>
+        </head>
+        <body>
+        {title_html}
+        {runs_index_html}
+        {summary_html}
+        {runs_html}
+        {ack}
+        </body>
+        </html>"""
+
         # Text Output
         self.textbox.setPlainText(text)
-        
+
         # HTML Output
         try:
             with open(html_file_output,"w") as output:
                 print(html, file=output)
-                
         except PermissionError:
             QMessageBox.warning(self, 'Warning', 'No permission for destination')
             return
@@ -850,3 +1148,4 @@ if __name__ == '__main__':
     except Exception as e:
         logging.error("Application initialization failed", exc_info=True)
         print(f"Application failed to start: {str(e)}")
+
