@@ -1,6 +1,8 @@
 # RunReporter
 This is a repository for Polio Sequencing Consortium Run Reporter app development. The app generates an aggregate report from DDNS/Isolate run reports.
 
+**Please note this README needs updating**
+
 ## Interface
 <p align="center">
 <img src="misc/app_interface.png" alt="Interface" height=70% width=70%>
