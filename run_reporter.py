@@ -748,7 +748,7 @@ class App(QMainWindow):
                 run_html += f"<p>No VDPVs to report were found</p>\n"    
             
             # Sabin positives
-            if report_mode == 'DDNS':
+            if report_mode in ['DDNS', 'Isolate']:
                 sabin_html_sections = []
                 for ddns_type in ['SABIN1', 'SABIN2', 'SABIN3']:
                     ddns_report = report.loc[
@@ -984,11 +984,12 @@ class App(QMainWindow):
             )
 
         # Title & file name
+        mode_label = 'DDNS' if report_mode == 'DDNS' else 'ISOLATE'
         if len(report_name_list) > 1:
-            title_text = f"DDNS REPORT FOR RUNS {report_name_list[0]} TO {report_name_list[-1]}"
+            title_text = f"{mode_label} REPORT FOR RUNS {report_name_list[0]} TO {report_name_list[-1]}"
             html_file_output = f"{destination_path}/{report_mode}_report_{report_name_list[0]}_to_{report_name_list[-1]}.html"
         else:
-            title_text = f"DDNS REPORT FOR RUN {report_name_list[0]}"
+            title_text = f"{mode_label} REPORT FOR RUN {report_name_list[0]}"
             html_file_output = f"{destination_path}/{report_mode}_report_{report_name_list[0]}.html"
 
         # Country/Lab

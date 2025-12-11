@@ -1,3 +1,5 @@
 /run_reporter.dist
+/build
+/__pycache_
 *.exe
 *.log
