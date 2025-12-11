@@ -49,8 +49,12 @@ V1.5.8 --> V1.5.9
 - Added support for wild type polioviruses
 - Added country and lab inputs for report
 
+
+V1.5.9 --> V1.6.0
+- Fixed issue with Isolate mode not reporting correctly
+- Fixed issue with ENV samples being classed as controls
 """
-version = '1.5.9'
+version = '1.6.0'
 
 def setup_logging(log_path=None):
     """Set up logging with a rotating file handler."""
@@ -541,7 +545,7 @@ class App(QMainWindow):
             
             envs = report.loc[report['sample'].str.match(r'^ENV-[A-Z]{3}[/-]\d{2}[/-]\d{3,5}')]
 
-            mask = report['sample'].str.match(r'^[A-Z]{3}[/-]\d{2}[/-]\d{3,5}')
+            mask = report['sample'].str.match(r'^[A-Z]{3}[/-]\d{2}[/-]\d{3,5}') | report['sample'].str.match(r'^ENV-[A-Z]{3}[/-]\d{2}[/-]\d{3,5}')
 
             invalid_in_report = (
                 report.loc[~mask, 'sample']
